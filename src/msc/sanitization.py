@@ -50,17 +50,18 @@ def sequence_to_other_df(X,group,key_col,from_key,to_key,val_col):
         lambda x: sequence_to_other(
             x,key_col,from_key,to_key,val_col))
 
-def data_loading_wraper(data_path):
+def data_loading_wraper(data_path,infer=False):
     # load data, fix some minor recurring issues
     data = pd.read_csv(data_path)
     data.loc[data["class"] == "DCE","class"] = "dce"
 
     # sanitize data
     data = sanitize_data(data)
-    data = sequence_to_other_df(
-        data,"study_uid","class","dwi","adc","percent_phase_field_of_view")
-    data = sequence_to_other_df(
-        data,"study_uid","class","dwi","adc","sar")
+    if infer == True:
+        data = sequence_to_other_df(
+            data,"study_uid","class","dwi","adc","percent_phase_field_of_view")
+        data = sequence_to_other_df(
+            data,"study_uid","class","dwi","adc","sar")
 
     X = data.drop(cols_to_drop,axis=1)
     y = np.array(data["class"])

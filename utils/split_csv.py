@@ -1,6 +1,7 @@
 import argparse
 import numpy as np
 import pandas as pd
+from numpy.random import default_rng
 from pandas.api.types import is_string_dtype
 
 if __name__ == "__main__":
@@ -17,6 +18,8 @@ if __name__ == "__main__":
                         type=str,required=True)
     parser.add_argument("--split_ratio",dest="split_ratio",
                         type=float,default=0.8)
+    parser.add_argument("--random_seed",dest="random_seed",default=42,
+                        type=int)
     
     args = parser.parse_args()
 
@@ -25,15 +28,17 @@ if __name__ == "__main__":
         if is_string_dtype(df[col]):
             df[col] = df[col].str.replace('"', '')
 
+    rng = default_rng(seed=args.random_seed)
+
     if args.id_col is None:
-        split = np.random.choice(
-            df.shape[0],int(args.split_ratio*df.shape[0]),eplace=False)
+        split = rng.choice(
+            df.shape[0],int(args.split_ratio*df.shape[0]),replace=False)
         split_a = split
         split_b = [i for i in range(df.shape[0]) if i not in split_a]
     else:
         ids = df[args.id_col]
         unique_ids = np.unique(ids)
-        id_split = np.random.choice(
+        id_split = rng.choice(
             unique_ids,int(args.split_ratio*len(unique_ids)),replace=False)
         id_split_a = id_split
         id_split_b = [i for i in unique_ids 

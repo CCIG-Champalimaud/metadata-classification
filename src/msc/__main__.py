@@ -1,10 +1,12 @@
 import argparse
+import os
 import numpy as np
+import dill
 import pandas as pd
 
 from sklearn.metrics import roc_auc_score
 from sklearn.pipeline import Pipeline
-from sklearn.model_selection import GridSearchCV, KFold
+from sklearn.model_selection import GridSearchCV, KFold, StratifiedKFold
 from sklearn.feature_selection import VarianceThreshold
 from sklearn.preprocessing import StandardScaler
 from skopt import BayesSearchCV
@@ -26,24 +28,53 @@ if __name__ == "__main__":
                         type=str,required=True)
     parser.add_argument("--n_folds",dest="n_folds",
                         type=int,default=10)
+    parser.add_argument("--n_jobs",dest="n_jobs",
+                        type=int,default=0)
     parser.add_argument("--model_name",dest="model_name",
-                        default="rf",choices=["rf","elastic","extra_trees"])
+                        default="rf",
+                        choices=["rf","elastic","extra_trees","xgb","catboost"])
     parser.add_argument("--bayesian_hp_opt",dest="bayesian_hp_opt",
                         action="store_true")
+    parser.add_argument("--exclude_cols",dest="exclude_cols",nargs="+")
+    parser.add_argument("--save_model",dest="save_model",
+                        action="store_true")
+    parser.add_argument("--random_seed",dest="random_seed",default=42,type=int)
     args = parser.parse_args()
 
     X,y,study_uids,unique_study_uids = data_loading_wraper(args.input_path)
 
-    kf = KFold(args.n_folds,shuffle=True,random_state=42)
+    kf = KFold(args.n_folds,shuffle=True,random_state=args.random_seed)
 
     nan_remover = RemoveNan()
 
-    fold_results = {"cv":[]}
+    train_results = {"cv":[],"args":vars(args)}
 
     f = 0
 
     model_name = args.model_name
-    bayesian = args.bayesian
+    bayesian = args.bayesian_hp_opt
+
+    if args.exclude_cols is not None:
+        text_sep_cols = [x for x in text_sep_cols 
+                         if x not in args.exclude_cols]
+        num_sep_cols = [x for x in num_sep_cols 
+                        if x not in args.exclude_cols]
+        num_cols = [x for x in num_cols if x not in args.exclude_cols]
+        
+    class_conversion = {
+        k:i for i,k in enumerate(np.sort(np.unique(y)))}
+    class_conversion_rev = {
+        class_conversion[k]:k for k in class_conversion}
+
+    if bayesian == True:
+        search_fn = BayesSearchCV
+        md = model_dict_bayes
+    else:
+        search_fn = GridSearchCV
+        md = model_dict
+
+    if args.model_name in ["rf","elastic","extra_trees"]:
+        md["random_state"] = args.random_seed
 
     for train_idxs,val_idxs in kf.split(unique_study_uids):
         print("Fold {}".format(f+1))
@@ -60,44 +91,62 @@ if __name__ == "__main__":
         val_y = y[val_idxs_long]
 
         print("\tTransforming data")
-        count_vec = TextColsToCounts(
-            text_cols={i:x for i,x in enumerate(X.columns) if x in text_sep_cols},
-            text_num_cols={i:x for i,x in enumerate(X.columns) if x in num_sep_cols},
-            num_cols={i:x for i,x in enumerate(X.columns) if x in num_cols})
-        count_vec.fit(training_X)
-        out = count_vec.transform(training_X)
-        out,training_y = nan_remover.transform(out,training_y)
-        out_val = count_vec.transform(val_X)
-        out_val,val_y = nan_remover.transform(out_val,val_y)
+        if args.model_name != "catboost":
+            count_vec = TextColsToCounts(
+                text_cols={i:x for i,x in enumerate(X.columns) if x in text_sep_cols},
+                text_num_cols={i:x for i,x in enumerate(X.columns) if x in num_sep_cols},
+                num_cols={i:x for i,x in enumerate(X.columns) if x in num_cols})
+            count_vec.fit(training_X)
+            out = count_vec.transform(training_X)
+            out_val = count_vec.transform(val_X)
+            if model_name != "xgb":
+                out,training_y = nan_remover.transform(out,training_y)
+                out_val,val_y = nan_remover.transform(out_val,val_y)
+            training_y = [class_conversion[x] for x in training_y]
+            val_y = [class_conversion[x] for x in val_y]
 
-        print("\tTraining model")
-        if bayesian == True:
-            md = model_dict_bayes
+            print("\tTraining model")
+            p = Pipeline(
+                [("remove_zero_var",VarianceThreshold()),
+                ("standardise",StandardScaler()),
+                ("model",md[model_name]["model"](**md[model_name]["params"]))]
+            )
+
+            cv = StratifiedKFold(5,shuffle=True,random_state=args.random_seed)
+            model = search_fn(
+                p,
+                {"model__"+k:md[model_name]["cv_params"][k]
+                    for k in md[model_name]["cv_params"]},
+                verbose=0,n_jobs=args.n_jobs,cv=5,scoring="f1_macro")
+
+            model.fit(out,training_y)
+            y_pred = model.predict(out_val)
+            val_y = [class_conversion_rev[x] for x in val_y]
+            y_pred = [class_conversion_rev[x] for x in y_pred]
+
         else:
-            md = model_dict
+            cat_feature_cols = text_sep_cols + num_sep_cols
+            fc = [x for x in training_X.columns if x in cat_feature_cols]
+            training_data = Pool(
+                data=FeaturesData(
+                    cat_feature_data=np.array(training_X[fc]),
+                    num_feature_data=np.array(training_X[num_cols],dtype=np.float32)),
+                label=np.array(training_y))
+            out_val = Pool(
+                data=FeaturesData(
+                    cat_feature_data=np.array(val_X[fc]),
+                    num_feature_data=np.array(val_X[num_cols],dtype=np.float32)),
+                label=val_y)
+            val_y = out_val.get_label()
 
-        p = Pipeline(
-            [("remove_zero_var",VarianceThreshold()),
-            ("standardise",StandardScaler()),
-            ("model",md[model_name]["model"](**md[model_name]["params"]))]
-        )
-
-        if bayesian == True:
-            search_fn = BayesSearchCV
-        else:
-            search_fn = GridSearchCV
-
-        model = search_fn(
-            p,
-            {"model__"+k:md[model_name]["cv_params"][k]
-                for k in md[model_name]["cv_params"]},
-            verbose=0,n_jobs=4,cv=3,scoring="f1_macro")
-
-        model.fit(out,training_y)
+            print("\tTraining model")
+            model = md[model_name]["model"](**model_dict[model_name]["params"])
+            model.fit(training_data)
+            count_vec = None
+            y_pred = model.predict(out_val)
 
         print("\tEvaluating model")
-        y_pred = model.predict(out_val)
-        fold_results["cv"].append({
+        train_results["cv"].append({
             "auc":roc_auc_score(val_y,model.predict_proba(out_val),
                                 multi_class="ovr"),
             "count_vec":count_vec,
@@ -105,21 +154,52 @@ if __name__ == "__main__":
             "y_true":val_y,
             "y_pred":y_pred,
             })
-        
+                        
         f += 1
 
     if args.test_set_path is not None:
         X_ho,y_ho,_,_ = data_loading_wraper(args.test_set_path)
-        fold_results["test"] = []
-        for i,f in enumerate(fold_results["cv"]):
-            count_vec = f["count_vec"]
-            model = f["model"]
-            test_data_pred = count_vec.transform(X_ho)
-            test_data_pred,y_test = nan_remover.transform(test_data_pred,y_ho)
+        train_results["test"] = []
+        if args.model_name != "catboost":
+            for i,f in enumerate(train_results["cv"]):
+                count_vec = f["count_vec"]
+                model = f["model"]
+                test_data_pred = count_vec.transform(X_ho)
+                test_data_pred,y_test = nan_remover.transform(test_data_pred,y_ho)
 
-            y_pred = model.predict(test_data_pred)
+                y_pred = model.predict(test_data_pred)
 
-            fold_results["test"].append(
-                {"y_true":y_test,"y_pred":y_pred,
-                 "auc":roc_auc_score(y_test,model.predict_proba(test_data_pred),
-                                     multi_class="ovr")})
+                train_results["test"].append(
+                    {"y_true":y_test,
+                     "y_pred":[class_conversion_rev[j] for j in y_pred],
+                     "auc":roc_auc_score(y_test,model.predict_proba(test_data_pred),
+                                         multi_class="ovr")})
+        else:
+            test_data_pred = Pool(
+                data=FeaturesData(
+                    cat_feature_data=np.array(X_ho[fc]),
+                    num_feature_data=np.array(X_ho[num_cols],dtype=np.float32)),
+                label=y_ho)
+            
+            for i,f in enumerate(train_results["cv"]):
+                model = f["model"]
+                y_pred = model.predict(test_data_pred)
+                y_test = test_data_pred.get_label()
+                train_results["test"].append(
+                    {"y_true":y_test,
+                     "y_pred":y_pred,
+                     "auc":roc_auc_score(y_test,model.predict_proba(test_data_pred),
+                                         multi_class="ovr")})
+
+    # models can get quite heavy, so if you are just playing around
+    # it might be best to skip saving the model
+    if args.save_model != True:
+        for i in range(len(train_results["cv"])):
+            del train_results["cv"][i]["model"]
+
+    # save everything
+    dir_name = os.path.dirname(args.output_path)
+    os.makedirs(dir_name,exist_ok=True)
+
+    with open(args.output_path, 'wb') as f:
+        dill.dump(train_results, f)
