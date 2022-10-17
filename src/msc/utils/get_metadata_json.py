@@ -64,11 +64,15 @@ if __name__ == "__main__":
     if args.n_workers < 2:
         for f in tqdm(files):
             individual_id = re.search(args.individual_pattern,f).group()
+            study_id,sequence_id = f.split(os.sep)[-2:]
             metadata = wraper(f)
             sd = metadata["series_description"]
             if individual_id not in all_metadata:
-                all_metadata[individual_id] = []
-            all_metadata[individual_id].append(metadata)
+                all_metadata[individual_id] = {}
+            if study_id not in all_metadata[individual_id]:
+                all_metadata[individual_id][study_id] = {}
+            
+            all_metadata[individual_id][study_id][sequence_id] = metadata
     
     else:
         p = Pool(args.n_workers)
@@ -83,9 +87,11 @@ if __name__ == "__main__":
                 for o in output:
                     individual_id = re.search(
                         args.individual_pattern,o["path"]).group()
+                    study_id,sequence_id = f.split(os.sep)[-2:]
                     if individual_id not in all_metadata:
-                        all_metadata[individual_id] = []
-                    all_metadata[individual_id].append(o)
+                        all_metadata[individual_id] = {}
+                    if study_id not in all_metadata[individual_id]:
+                        all_metadata[individual_id][study_id] = {}
                 prog.update()
                 batch = []
 
@@ -94,9 +100,11 @@ if __name__ == "__main__":
             for o in output:
                 individual_id = re.search(
                     args.individual_pattern,o["path"]).group()
+                study_id,sequence_id = f.split(os.sep)[-2:]
                 if individual_id not in all_metadata:
-                    all_metadata[individual_id] = []
-                all_metadata[individual_id].append(o)
+                    all_metadata[individual_id] = {}
+                if study_id not in all_metadata[individual_id]:
+                    all_metadata[individual_id][study_id] = {}
             batch = []
             prog.update()
         prog.close()
