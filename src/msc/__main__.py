@@ -3,13 +3,14 @@ import os
 import numpy as np
 import dill
 import pandas as pd
+import fasttreeshap as shap
 
 from sklearn.metrics import roc_auc_score
 from sklearn.pipeline import Pipeline
 from sklearn.model_selection import GridSearchCV, KFold, StratifiedKFold
 from sklearn.feature_selection import VarianceThreshold
 from sklearn.preprocessing import StandardScaler
-from skopt import BayesSearchCV
+from catboost import EFstrType
 
 from .constants import *
 from .feature_extraction import *
@@ -33,16 +34,19 @@ if __name__ == "__main__":
     parser.add_argument("--model_name",dest="model_name",
                         default="rf",
                         choices=["rf","elastic","extra_trees","xgb","catboost"])
-    parser.add_argument("--bayesian_hp_opt",dest="bayesian_hp_opt",
-                        action="store_true")
     parser.add_argument("--exclude_cols",dest="exclude_cols",nargs="+")
     parser.add_argument("--save_model",dest="save_model",
                         action="store_true")
     parser.add_argument("--random_seed",dest="random_seed",default=42,type=int)
+    parser.add_argument("--subset",dest="subset",default=None,type=int)
     args = parser.parse_args()
 
     X,y,study_uids,unique_study_uids = data_loading_wraper(args.input_path)
-
+    if args.subset is not None:
+        idxs = np.random.choice(X.shape[0],args.subset,replace=False)
+        X = X.loc[idxs]
+        y = y[idxs]
+        study_uids = study_uids[idxs]
     kf = KFold(args.n_folds,shuffle=True,random_state=args.random_seed)
 
     nan_remover = RemoveNan()
@@ -52,7 +56,6 @@ if __name__ == "__main__":
     f = 0
 
     model_name = args.model_name
-    bayesian = args.bayesian_hp_opt
 
     if args.exclude_cols is not None:
         text_sep_cols = [x for x in text_sep_cols 
@@ -60,21 +63,20 @@ if __name__ == "__main__":
         num_sep_cols = [x for x in num_sep_cols 
                         if x not in args.exclude_cols]
         num_cols = [x for x in num_cols if x not in args.exclude_cols]
+        all_cols = text_sep_cols + num_sep_cols + num_cols
         
     class_conversion = {
         k:i for i,k in enumerate(np.sort(np.unique(y)))}
     class_conversion_rev = {
         class_conversion[k]:k for k in class_conversion}
 
-    if bayesian == True:
-        search_fn = BayesSearchCV
-        md = model_dict_bayes
-    else:
-        search_fn = GridSearchCV
-        md = model_dict
+    search_fn = GridSearchCV
+    md = model_dict
 
-    if args.model_name in ["rf","elastic","extra_trees"]:
-        md["random_state"] = args.random_seed
+    if args.model_name in ["rf","elastic","extra_trees","xgb"]:
+        md[args.model_name]["params"]["random_state"] = args.random_seed
+    if args.model_name == "catboost":
+        md[args.model_name]["params"]["random_seed"] = args.random_seed
 
     for train_idxs,val_idxs in kf.split(unique_study_uids):
         print("Fold {}".format(f+1))
@@ -107,22 +109,27 @@ if __name__ == "__main__":
 
             print("\tTraining model")
             p = Pipeline(
-                [("remove_zero_var",VarianceThreshold()),
-                ("standardise",StandardScaler()),
-                ("model",md[model_name]["model"](**md[model_name]["params"]))]
+                [("rzv",VarianceThreshold()),
+                 ("model",md[model_name]["model"](**md[model_name]["params"]))]
             )
 
-            cv = StratifiedKFold(5,shuffle=True,random_state=args.random_seed)
-            model = search_fn(
-                p,
-                {"model__"+k:md[model_name]["cv_params"][k]
-                    for k in md[model_name]["cv_params"]},
-                verbose=0,n_jobs=args.n_jobs,cv=5,scoring="f1_macro")
+            if len(md[model_name]["cv_params"]) > 0:
+                cv = StratifiedKFold(5,shuffle=True,random_state=args.random_seed)
+                model = search_fn(
+                    p,
+                    {"model__"+k:md[model_name]["cv_params"][k]
+                        for k in md[model_name]["cv_params"]},
+                    verbose=0,n_jobs=args.n_jobs,cv=5,scoring="f1_macro")
+                model.fit(out,training_y)
+                model = model.best_estimator_
+            else:
+                model = p
+                model.fit(out,training_y)
 
-            model.fit(out,training_y)
             y_pred = model.predict(out_val)
             val_y = [class_conversion_rev[x] for x in val_y]
             y_pred = [class_conversion_rev[x] for x in y_pred]
+            cols_to_save = count_vec.new_col_names_
 
         else:
             cat_feature_cols = text_sep_cols + num_sep_cols
@@ -130,12 +137,16 @@ if __name__ == "__main__":
             training_data = Pool(
                 data=FeaturesData(
                     cat_feature_data=np.array(training_X[fc]),
-                    num_feature_data=np.array(training_X[num_cols],dtype=np.float32)),
+                    num_feature_data=np.array(training_X[num_cols],dtype=np.float32),
+                    num_feature_names=num_cols,
+                    cat_feature_names=fc),
                 label=np.array(training_y))
             out_val = Pool(
                 data=FeaturesData(
                     cat_feature_data=np.array(val_X[fc]),
-                    num_feature_data=np.array(val_X[num_cols],dtype=np.float32)),
+                    num_feature_data=np.array(val_X[num_cols],dtype=np.float32),
+                    num_feature_names=num_cols,
+                    cat_feature_names=fc),
                 label=val_y)
             val_y = out_val.get_label()
 
@@ -144,6 +155,7 @@ if __name__ == "__main__":
             model.fit(training_data)
             count_vec = None
             y_pred = model.predict(out_val)
+            cols_to_save = num_cols + fc
 
         print("\tEvaluating model")
         train_results["cv"].append({
@@ -153,10 +165,12 @@ if __name__ == "__main__":
             "model":model,
             "y_true":val_y,
             "y_pred":y_pred,
+            "feature_names":cols_to_save
             })
-                        
+        
         f += 1
 
+    print("\tEvaluating models (test dataset)")
     if args.test_set_path is not None:
         X_ho,y_ho,_,_ = data_loading_wraper(args.test_set_path)
         train_results["test"] = []
@@ -165,29 +179,50 @@ if __name__ == "__main__":
                 count_vec = f["count_vec"]
                 model = f["model"]
                 test_data_pred = count_vec.transform(X_ho)
-                test_data_pred,y_test = nan_remover.transform(test_data_pred,y_ho)
+                if model_name != "xgb":
+                    test_data_pred,y_test = nan_remover.transform(
+                        test_data_pred,y_ho)
+                else:
+                    y_test = y_ho
+                # calculate shape values
+                explainer = shap.TreeExplainer(
+                    model["model"],n_jobs=args.n_jobs)
+                feature_importance = np.stack(
+                    explainer(
+                        model["rzv"].transform(test_data_pred),
+                        check_additivity=False).values,
+                        axis=1)
 
+                # predict
                 y_pred = model.predict(test_data_pred)
 
                 train_results["test"].append(
                     {"y_true":y_test,
                      "y_pred":[class_conversion_rev[j] for j in y_pred],
+                     "feature_importance":feature_importance,
                      "auc":roc_auc_score(y_test,model.predict_proba(test_data_pred),
                                          multi_class="ovr")})
         else:
             test_data_pred = Pool(
                 data=FeaturesData(
                     cat_feature_data=np.array(X_ho[fc]),
-                    num_feature_data=np.array(X_ho[num_cols],dtype=np.float32)),
+                    num_feature_data=np.array(X_ho[num_cols],dtype=np.float32),
+                    num_feature_names=num_cols,
+                    cat_feature_names=fc),
                 label=y_ho)
             
             for i,f in enumerate(train_results["cv"]):
                 model = f["model"]
+                # calculate shape values
+                feature_importance = model.get_feature_importance(
+                    data=test_data_pred,type=EFstrType.ShapValues)
+
                 y_pred = model.predict(test_data_pred)
                 y_test = test_data_pred.get_label()
                 train_results["test"].append(
                     {"y_true":y_test,
                      "y_pred":y_pred,
+                     "feature_importance":feature_importance,
                      "auc":roc_auc_score(y_test,model.predict_proba(test_data_pred),
                                          multi_class="ovr")})
 

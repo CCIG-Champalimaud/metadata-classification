@@ -14,7 +14,8 @@ text_sep_cols = ["image_type",
                  "image_type",
                  "scan_options",
                  "photometric_interpretation",
-                 "modality"]
+                 "modality",
+                 "series_description"]
 
 num_sep_cols = ["acquisition_matrix",
                 "image_orientation_patient",
@@ -41,8 +42,7 @@ num_cols = ["number_of_images"]
 
 cols_to_drop = ["study_uid","series_uid","class","diffusion_directionality",
                 "spectrally_selected_suppression","reconstruction_matrix",
-                "number_of_phase_encoding_steps","inversion_time",
-                "series_description"]
+                "number_of_phase_encoding_steps","inversion_time"]
 
 replace_cols = {"diffusion_bvalue":"-",
                 "number_of_echos":"1",

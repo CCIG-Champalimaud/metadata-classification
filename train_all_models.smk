@@ -1,6 +1,6 @@
 import os
 
-n_folds = 10
+n_folds = 5
 n_jobs = 4
 seed = 42
 output_paths = []
@@ -9,6 +9,7 @@ data_full = "data/data_full.tsv"
 data_train = "data/data_train.csv"
 data_test = "data/data_test.csv"
 output_metrics = "data_output/metrics.csv"
+output_features = "data_output/feature_importances.csv"
 models_dir = "models"
 
 os.makedirs("models",exist_ok=True)
@@ -24,7 +25,6 @@ model_list = [
     "xgb",
     "rf",
     "catboost",
-    "extra_trees"
     ]
 
 exclusion_dict = {}
@@ -42,7 +42,7 @@ for model_name in model_list:
         output_paths.append(output_path)
 
 rule all:
-    input: output_paths,output_metrics
+    input: output_paths,output_metrics,output_features
 
 rule split_data:
     input:
@@ -91,7 +91,19 @@ rule collect_all_metrics:
         output_metrics
     shell:
         """
-        python3 utils/collect_metrics.py \
+        python3 src/msc/utils/collect_metrics.py \
+            --input_path {models_dir} \
+            --output_path {output}
+        """
+
+rule collect_all_feature_importances:
+    input:
+        output_paths
+    output:
+        output_features
+    shell:
+        """
+        python3 src/msc/utils/get_feature_importance.py \
             --input_path {models_dir} \
             --output_path {output}
         """

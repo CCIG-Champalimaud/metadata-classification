@@ -23,10 +23,11 @@ def sanitize_input(X,replacements={},strips=[]):
             X[i] = X[i].lower()
     return np.array(X)
 
-rep_dict = {"|":" ","-":"",
-            "_":"",";":" ",
-            "(":"",")":"",
-            "_":" "}
+rep_dict = {"|":" ","-":" ",
+            ";":" ",",":" ",".":" ",
+            "(":" ",")":" ",
+            "_":" ",":":" "}
+
 def sanitize_data(data):
     for k in text_sep_cols:
         data[k] = sanitize_input(
@@ -36,7 +37,6 @@ def sanitize_data(data):
             data[k],rep_dict,[" "])
     for k in replace_cols:
         data.loc[data[k]=="",k] = replace_cols[k]
-    
     return data
 
 def sequence_to_other(X,key_col,from_key,to_key,val_col):

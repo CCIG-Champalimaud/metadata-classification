@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 from copy import deepcopy
 from sklearn.feature_extraction.text import CountVectorizer
 
@@ -58,7 +59,9 @@ class TextColsToCounts:
         self.vectorizers_ = {}
         self.col_name_dict_ = {}
         for col in self.text_cols:
-            self.vectorizers_[col] = CountVectorizer()
+            self.vectorizers_[col] = CountVectorizer(
+                lowercase=True,analyzer='word',min_df=0.05,
+                binary=True)
             d = X[:,col]
             self.vectorizers_[col].fit(d)
             self.col_name_dict_[col] = [
@@ -79,16 +82,30 @@ class TextColsToCounts:
             self.new_col_names_.extend(self.col_name_dict_[c])
     
     def transform(self,X,y=None):
+        if isinstance(X,pd.DataFrame):
+            all_cols = {}
+            for k in self.text_cols:
+                all_cols[self.text_cols[k]] = k
+            for k in self.text_num_cols:
+                all_cols[self.text_num_cols[k]] = k
+            for k in self.num_cols:
+                all_cols[self.num_cols[k]] = k
+        else:
+            all_cols = {i:i for i in self.all_cols_}
         X = np.array(deepcopy(X))
         output = []
-        for col in self.all_cols_:
+        for col in all_cols:
+            col = all_cols[col]
             if col in self.text_cols:
                 mat = self.vectorizers_[col].transform(X[:,col])
                 mat = mat.todense()
+                t = "text"
             elif col in self.text_num_cols:
                 mat = self.vectorizers_[col].transform(X[:,col])
+                t = "num_text"
             else:
                 mat = np.array(X[:,col])[:,np.newaxis]
+                t = "num"
             output.append(np.array(mat))
         return np.concatenate(output,axis=1).astype(np.float32)
 
