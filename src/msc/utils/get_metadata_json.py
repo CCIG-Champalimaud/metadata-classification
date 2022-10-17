@@ -19,15 +19,18 @@ def filter_b_value(d:dict)->dict:
     Returns:
         dict: metadata dictionary with only the highest b-value entries.
     """
-    bval = np.array(d["diffusion_bvalue"])
-    bval[bval == "-"] = "0.0"
-    bval = np.float32(bval)
-    s = np.unique(bval)
-    if len(s) > 1:
-        max_bval = np.max(s)
-        for k in d:
-            if k not in ["number_of_images","path"]:
-                d[k] = [x for i,x in enumerate(d[k]) if bval[i] == max_bval]
+    try:
+        bval = np.array(d["diffusion_bvalue"])
+        bval[bval == "-"] = "0.0"
+        bval = np.float32(bval)
+        s = np.unique(bval)
+        if len(s) > 1:
+            max_bval = np.max(s)
+            for k in d:
+                if k not in ["number_of_images","path"]:
+                    d[k] = [x for i,x in enumerate(d[k]) if bval[i] == max_bval]
+    except:
+        pass
     return d
 
 def wraper(p:str)->dict:
