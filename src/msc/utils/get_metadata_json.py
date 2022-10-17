@@ -57,7 +57,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     all_metadata = {}
-    files = glob(os.path.join(args.input_dir,args.pattern))[:250]
+    files = glob(os.path.join(args.input_dir,args.pattern))
     if args.n_workers < 2:
         for f in tqdm(files):
             individual_id = re.search(args.individual_pattern,f).group()
