@@ -21,7 +21,7 @@ def filter_b_value(d:dict)->dict:
     """
     try:
         bval = np.array(d["diffusion_bvalue"])
-        bval[bval == "-"] = "0.0"
+        bval[bval == "-"] = "-1"
         bval = np.float32(bval)
         s = np.unique(bval)
         if len(s) > 1:
