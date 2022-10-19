@@ -9,18 +9,19 @@ from tqdm import tqdm
 
 from ..dicom_feature_extraction import extract_all_metadata_from_dicom
 
-def filter_b_value(d:dict)->dict:
+def filter_b_value(d:dict,bval_key:str="diffusion_bvalue")->dict:
     """Filters the metadata dictionary and keeps only entries with the
     maximum b-value.
 
     Args:
         d (dict): metadata dictionary.
+        bval_key (str, optional): key corresponding to b-value
 
     Returns:
         dict: metadata dictionary with only the highest b-value entries.
     """
     try:
-        bval = np.array(d["diffusion_bvalue"])
+        bval = np.array(d[bval_key])
         bval[bval == "-"] = "-1"
         bval = np.float32(bval)
         s = np.unique(bval)
@@ -28,7 +29,8 @@ def filter_b_value(d:dict)->dict:
             max_bval = np.max(s)
             for k in d:
                 if k not in ["number_of_images","path"]:
-                    d[k] = [x for i,x in enumerate(d[k]) if bval[i] == max_bval]
+                    d[k] = [x for i,x in enumerate(d[k]) 
+                            if bval[i] == max_bval]
     except:
         pass
     return d
@@ -45,6 +47,11 @@ def wraper(p:str)->dict:
     """
     d = extract_all_metadata_from_dicom(p)
     d = filter_b_value(d)
+    # siemens and ge medical systems store the b-values differently by default
+    if "siemens" in d["manufacturer"][0].lower():
+        d = filter_b_value(d,"diffusion_bvalue_siemens")
+    if "ge med" in d["manufacturer"][0].lower():
+        d = filter_b_value(d,"diffusion_bvalue_ge")
     return d
 
 if __name__ == "__main__":

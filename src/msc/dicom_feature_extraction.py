@@ -44,7 +44,9 @@ dicom_header_dict = dict(
     number_of_echos=("0018","0086"),
     number_of_temporal_positions=("0020","0105"),
     modality=("0008","0060"),
-    series_description=("0008","103E")
+    series_description=("0008","103E"),
+    diffusion_bvalue_ge=("0043","1039"),
+    diffusion_bvalue_siemens=("0019","100C"),
 )
 
 def extract_features_from_dicom(path,join=True,return_paths=False):
@@ -96,7 +98,6 @@ def extract_all_metadata_from_dicom(path,skip_seg=True):
         dicom_file = read_file(file)
         # skips file if SOP class is segmentation
         if dicom_file[0x0008,0x0016] == seg_sop and skip_seg == True:
-            print("!")
             continue
         for k in dicom_header_dict:
             dicom_key = dicom_header_dict[k]
@@ -106,6 +107,14 @@ def extract_all_metadata_from_dicom(path,skip_seg=True):
                 output_dict[k] = []
             if dicom_key in dicom_file:
                 v = dicom_file[dicom_key].value
+                if k == "diffusion_bvalue_ge":
+                    v = eval(str(v))
+                    if isinstance(v,list) == False:
+                        v = v.decode()
+                        v = v.split("\\")
+                        v = v[0]
+                        if len(v) > 5:
+                            v = v[-4:]
                 # replace times with empty space...
                 if k == "series_description":
                     v = re.sub("[0-9]+/[0-9]+/[0-9]+", "", v)
@@ -123,6 +132,10 @@ def extract_all_metadata_from_dicom(path,skip_seg=True):
     output_dict["file_paths"] = file_paths
     output_dict["path"] = path
 
+    """if output_dict["manufacturer"][0] == "GE MEDICAL SYSTEMS":
+        print(set(output_dict["diffusion_bvalue_ge"]),
+              set(output_dict["series_description"]))
+    """
     return output_dict
 
 if __name__ == "__main__":
