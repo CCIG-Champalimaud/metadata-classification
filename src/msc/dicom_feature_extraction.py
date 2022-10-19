@@ -4,6 +4,8 @@ import pydicom
 from glob import glob
 from pydicom.filereader import read_file
 
+seg_sop = "1.2.840.10008.5.1.4.1.1.66.4"
+
 dicom_header_dict = dict(
     study_uid=("0020","000D"),
     series_uid=("0020","000E"),
@@ -86,12 +88,16 @@ def extract_features_from_dicom(path,join=True,return_paths=False):
 
     return output_dict
 
-def extract_all_metadata_from_dicom(path):
+def extract_all_metadata_from_dicom(path,skip_seg=True):
     file_paths = glob(os.path.join(path,"*dcm"))
     n_images = len(file_paths)
     output_dict = {"number_of_images":n_images}
     for file in file_paths:
         dicom_file = read_file(file)
+        # skips file if SOP class is segmentation
+        if dicom_file[0x0008,0x0016] == seg_sop and skip_seg == True:
+            print("!")
+            continue
         for k in dicom_header_dict:
             dicom_key = dicom_header_dict[k]
             dicom_key = (eval("0x{}".format(dicom_key[0])),
