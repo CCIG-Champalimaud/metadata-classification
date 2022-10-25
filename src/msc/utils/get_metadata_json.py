@@ -46,7 +46,7 @@ def wraper(p:str)->dict:
         d (dict): metadata dictionary.
     """
     d = extract_all_metadata_from_dicom(p)
-    if len(d["file_paths"]) > 0:
+    if len(d["file_paths"]) > 0 and d["seg"] == False:
         d = filter_b_value(d)
         # siemens and ge medical systems store the b-values differently by default
         if "siemens" in d["manufacturer"][0].lower():
@@ -55,7 +55,7 @@ def wraper(p:str)->dict:
             d = filter_b_value(d,"diffusion_bvalue_ge")
     return d
 
-def update_dict(dictionary,individual_id,study_id,sequence_id,metadata):
+def update_dict(dictionary,individual_id,study_id,sequence_id,d):
     if len(metadata["file_paths"]) > 0 and metadata["seg"] == False:
         if individual_id not in dictionary:
             dictionary[individual_id] = {}

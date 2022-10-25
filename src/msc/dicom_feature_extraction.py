@@ -98,7 +98,7 @@ def extract_all_metadata_from_dicom(path,skip_seg=True):
     for file in file_paths:
         dicom_file = read_file(file)
         # skips file if SOP class is segmentation
-        if dicom_file[0x0008,0x0016] == seg_sop:
+        if dicom_file[0x0008,0x0016].value == seg_sop:
             is_seg = True
             continue
         for k in dicom_header_dict:
