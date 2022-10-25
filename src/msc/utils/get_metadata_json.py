@@ -56,7 +56,7 @@ def wraper(p:str)->dict:
     return d
 
 def update_dict(dictionary,individual_id,study_id,sequence_id,metadata):
-    if len(metadata["file_paths"]) > 0:
+    if len(metadata["file_paths"]) > 0 and metadata["seg"] == False:
         if individual_id not in dictionary:
             dictionary[individual_id] = {}
         if study_id not in dictionary[individual_id]:

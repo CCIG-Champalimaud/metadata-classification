@@ -94,10 +94,12 @@ def extract_all_metadata_from_dicom(path,skip_seg=True):
     file_paths = glob(os.path.join(path,"*dcm"))
     n_images = len(file_paths)
     output_dict = {"number_of_images":n_images}
+    is_seg = False
     for file in file_paths:
         dicom_file = read_file(file)
         # skips file if SOP class is segmentation
         if dicom_file[0x0008,0x0016] == seg_sop:
+            is_seg = True
             continue
         for k in dicom_header_dict:
             dicom_key = dicom_header_dict[k]
@@ -131,6 +133,7 @@ def extract_all_metadata_from_dicom(path,skip_seg=True):
         
     output_dict["file_paths"] = file_paths
     output_dict["path"] = path
+    output_dict["seg"] = is_seg
 
     return output_dict
 
