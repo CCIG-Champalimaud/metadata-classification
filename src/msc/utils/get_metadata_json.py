@@ -46,13 +46,24 @@ def wraper(p:str)->dict:
         d (dict): metadata dictionary.
     """
     d = extract_all_metadata_from_dicom(p)
-    d = filter_b_value(d)
-    # siemens and ge medical systems store the b-values differently by default
-    if "siemens" in d["manufacturer"][0].lower():
-        d = filter_b_value(d,"diffusion_bvalue_siemens")
-    if "ge med" in d["manufacturer"][0].lower():
-        d = filter_b_value(d,"diffusion_bvalue_ge")
+    if len(d["file_paths"]) > 0:
+        d = filter_b_value(d)
+        # siemens and ge medical systems store the b-values differently by default
+        if "siemens" in d["manufacturer"][0].lower():
+            d = filter_b_value(d,"diffusion_bvalue_siemens")
+        if "ge med" in d["manufacturer"][0].lower():
+            d = filter_b_value(d,"diffusion_bvalue_ge")
     return d
+
+def update_dict(dictionary,individual_id,study_id,sequence_id,metadata):
+    if len(metadata["file_paths"]) > 0:
+        if individual_id not in dictionary:
+            dictionary[individual_id] = {}
+        if study_id not in dictionary[individual_id]:
+            dictionary[individual_id][study_id] = {}
+        
+        dictionary[individual_id][study_id][sequence_id] = metadata
+    return dictionary
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -73,14 +84,8 @@ if __name__ == "__main__":
             individual_id = re.search(args.individual_pattern,f).group()
             study_id,sequence_id = f.split(os.sep)[-2:]
             metadata = wraper(f)
-            sd = metadata["series_description"]
-            if individual_id not in all_metadata:
-                all_metadata[individual_id] = {}
-            if study_id not in all_metadata[individual_id]:
-                all_metadata[individual_id][study_id] = {}
-            
-            all_metadata[individual_id][study_id][sequence_id] = metadata
-    
+            all_metadata = update_dict(
+                all_metadata,individual_id,study_id,sequence_id,metadata)
     else:
         p = Pool(args.n_workers)
         batch = []
@@ -95,10 +100,8 @@ if __name__ == "__main__":
                     individual_id = re.search(
                         args.individual_pattern,o["path"]).group()
                     study_id,sequence_id = f.split(os.sep)[-2:]
-                    if individual_id not in all_metadata:
-                        all_metadata[individual_id] = {}
-                    if study_id not in all_metadata[individual_id]:
-                        all_metadata[individual_id][study_id] = {}
+                    all_metadata = update_dict(
+                        all_metadata,individual_id,study_id,sequence_id,o)
                 prog.update()
                 batch = []
 
@@ -108,10 +111,8 @@ if __name__ == "__main__":
                 individual_id = re.search(
                     args.individual_pattern,o["path"]).group()
                 study_id,sequence_id = f.split(os.sep)[-2:]
-                if individual_id not in all_metadata:
-                    all_metadata[individual_id] = {}
-                if study_id not in all_metadata[individual_id]:
-                    all_metadata[individual_id][study_id] = {}
+                all_metadata = update_dict(
+                    all_metadata,individual_id,study_id,sequence_id,o)
             batch = []
             prog.update()
         prog.close()

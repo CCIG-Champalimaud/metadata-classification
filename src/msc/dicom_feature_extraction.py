@@ -97,7 +97,7 @@ def extract_all_metadata_from_dicom(path,skip_seg=True):
     for file in file_paths:
         dicom_file = read_file(file)
         # skips file if SOP class is segmentation
-        if dicom_file[0x0008,0x0016] == seg_sop and skip_seg == True:
+        if dicom_file[0x0008,0x0016] == seg_sop:
             continue
         for k in dicom_header_dict:
             dicom_key = dicom_header_dict[k]
@@ -132,10 +132,6 @@ def extract_all_metadata_from_dicom(path,skip_seg=True):
     output_dict["file_paths"] = file_paths
     output_dict["path"] = path
 
-    """if output_dict["manufacturer"][0] == "GE MEDICAL SYSTEMS":
-        print(set(output_dict["diffusion_bvalue_ge"]),
-              set(output_dict["series_description"]))
-    """
     return output_dict
 
 if __name__ == "__main__":
