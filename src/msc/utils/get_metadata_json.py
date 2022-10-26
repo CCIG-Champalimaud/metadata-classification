@@ -90,7 +90,6 @@ if __name__ == "__main__":
         p = Pool(args.n_workers)
         batch = []
         l = args.n_workers * 8
-        print("Processing data in batches with {} files".format(l))
         prog = tqdm(total=len(files) // l + (len(files) % l > 0))
         for f in files:
             batch.append(f)
@@ -117,4 +116,4 @@ if __name__ == "__main__":
             prog.update()
         prog.close()
 
-    #print(json.dumps(all_metadata,indent=2,sort_keys=True))
+    print(json.dumps(all_metadata,indent=2,sort_keys=True))
