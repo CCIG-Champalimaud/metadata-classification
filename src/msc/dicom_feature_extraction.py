@@ -114,9 +114,11 @@ def extract_all_metadata_from_dicom(path,skip_seg=True):
                     if isinstance(v,list) == False:
                         v = v.decode()
                         v = v.split("\\")
-                        v = v[0]
-                        if len(v) > 5:
-                            v = v[-4:]
+                        v = str(v[0])
+                    else:
+                        v = str(v[0])
+                    if len(v) > 5:
+                        v = v[-4:]
                 # replace times with empty space...
                 if k == "series_description":
                     v = re.sub("[0-9]+/[0-9]+/[0-9]+", "", v)
@@ -130,7 +132,7 @@ def extract_all_metadata_from_dicom(path,skip_seg=True):
                 v = " ".join([str(x) for x in v])
             v = str(v)
             output_dict[k].append(v)
-        
+    
     output_dict["file_paths"] = file_paths
     output_dict["path"] = path
     output_dict["seg"] = is_seg

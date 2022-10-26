@@ -56,13 +56,13 @@ def wraper(p:str)->dict:
     return d
 
 def update_dict(dictionary,individual_id,study_id,sequence_id,d):
-    if len(metadata["file_paths"]) > 0 and metadata["seg"] == False:
+    if len(d["file_paths"]) > 0 and d["seg"] == False:
         if individual_id not in dictionary:
             dictionary[individual_id] = {}
         if study_id not in dictionary[individual_id]:
             dictionary[individual_id][study_id] = {}
         
-        dictionary[individual_id][study_id][sequence_id] = metadata
+        dictionary[individual_id][study_id][sequence_id] = d
     return dictionary
 
 if __name__ == "__main__":
@@ -117,4 +117,4 @@ if __name__ == "__main__":
             prog.update()
         prog.close()
 
-    print(json.dumps(all_metadata,indent=2,sort_keys=True))
+    #print(json.dumps(all_metadata,indent=2,sort_keys=True))
