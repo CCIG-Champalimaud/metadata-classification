@@ -95,8 +95,13 @@ def extract_all_metadata_from_dicom(path,skip_seg=True):
     n_images = len(file_paths)
     output_dict = {"number_of_images":n_images}
     is_seg = False
+    is_valid = True
     for file in file_paths:
         dicom_file = read_file(file)
+        # skips file if basic tag not present
+        if (0x0008,0x0016) not in dicom_file:
+            is_valid = False
+            continue
         # skips file if SOP class is segmentation
         if dicom_file[0x0008,0x0016].value == seg_sop:
             is_seg = True
@@ -136,6 +141,7 @@ def extract_all_metadata_from_dicom(path,skip_seg=True):
     output_dict["file_paths"] = file_paths
     output_dict["path"] = path
     output_dict["seg"] = is_seg
+    output_dict["valid"] = is_valid
 
     return output_dict
 

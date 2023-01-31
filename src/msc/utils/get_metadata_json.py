@@ -46,7 +46,7 @@ def wraper(p:str)->dict:
         d (dict): metadata dictionary.
     """
     d = extract_all_metadata_from_dicom(p)
-    if len(d["file_paths"]) > 0 and d["seg"] == False:
+    if len(d["file_paths"]) > 0 and d["seg"] == False and d["valid"] == True:
         d = filter_b_value(d)
         # siemens and ge medical systems store the b-values differently by default
         if "siemens" in d["manufacturer"][0].lower():
