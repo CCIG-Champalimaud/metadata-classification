@@ -23,10 +23,15 @@ def sanitize_input(X,replacements={},strips=[]):
             X[i] = X[i].lower()
     return np.array(X)
 
-rep_dict = {"|":" ","-":" ",
-            ";":" ",",":" ",".":" ",
-            "(":" ",")":" ",
-            "_":" ",":":" "}
+rep_dict = {r"\|":" ",
+            r"\-":" ",
+            r";":" ",
+            r",":" ",
+            r"\.":" ",
+            r"\(":" ",
+            r"\)":" ",
+            r"_":" ",
+            r":":" "}
 
 def sanitize_data(data):
     for k in text_sep_cols:

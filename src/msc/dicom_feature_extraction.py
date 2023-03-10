@@ -49,6 +49,49 @@ dicom_header_dict = dict(
     diffusion_bvalue_siemens=("0019","100C"),
 )
 
+pcai_mapping = {
+    "0010,0020" : 'patient_id',
+    "0020,000d" : 'study_uid',
+    "0020,000e" : 'series_uid',
+    "0020,0013" : 'instance_number',
+    "0018,9087" : 'diffusion_bvalue',
+    "0018,9075" : 'diffusion_directionality',
+    "0018,0081" : 'echo_time',
+    "0018,0091" : 'echo_train_length',
+    "0018,0080" : 'repetition_time',
+    "0018,1314" : 'flip_angle',
+    "0018,1312" : 'in_plane_phase_encoding_direction',
+    "0018,0023" : 'mr_acquisition_type',
+    "0018,1310" : 'acquisition_matrix',
+    "0018,5100" : 'patient_position',
+    "0018,1100" : 'reconstruction_matrix',# actually reconstruction_diameter
+    "0018,0087" : 'magnetic_field_strength',
+    "0008,0070" : 'manufacturer',
+    "0008,1090" : 'manufacturer_model_name',
+    "0018,0089" : 'number_of_phase_encoding_steps',
+    "0018,0094" : 'percent_phase_field_of_view',
+    "0018,0095" : 'pixel_bandwidth',
+    "0018,1250" : 'receive_coil_name',
+    "0018,1251" : 'transmit_coil_name',
+    "0018,1316" : 'sar',
+    "0018,0020" : 'scanning_sequence',
+    "0018,0021" : 'sequence_variant',
+    "0018,0050" : 'slice_thickness',
+    "0018,1020" : 'software_versions',
+    "0020,0110" : 'temporal_resolution',
+    "0020,0037" : 'image_orientation_patient',
+    "0008,0008" : 'image_type',
+    "0018,0022" : 'scan_options',
+    "0028,0004" : 'photometric_interpretation',
+    "0018,9025" : 'spectrally_selected_suppression',
+    "0018,0082" : 'inversion_time',
+    "0028,0030" : 'pixel_spacing',
+    "0018,0086" : 'number_of_echos',
+    "0020,0105" : 'number_of_temporal_positions',
+    "0008,0060" : 'modality',
+    "0008,103e" : 'series_description',
+ }
+
 def extract_features_from_dicom(path,join=True,return_paths=False):
     file_paths = glob(os.path.join(path,"*dcm"))
     n_images = len(file_paths)
