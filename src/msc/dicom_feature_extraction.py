@@ -190,5 +190,8 @@ def extract_all_metadata_from_dicom(path,skip_seg=True):
 
 if __name__ == "__main__":
     import sys
+    import json
 
-    print(extract_features_from_dicom(sys.argv[1]))
+    print(json.dumps(
+        extract_features_from_dicom(sys.argv[1]),
+        indent=1))
