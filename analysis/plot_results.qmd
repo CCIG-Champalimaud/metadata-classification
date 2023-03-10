@@ -5,6 +5,10 @@ format:
     toc: true
     fig-dpi: 200
     html-math-method: katex
+  pdf:
+    toc: true
+    fig-dpi: 200
+    fig-format: png
 ---
 
 # Introduction 
