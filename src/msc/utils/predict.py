@@ -3,41 +3,74 @@ import dill
 import numpy as np
 import polars as po
 import os
-from scipy.stats import mode
 from catboost import FeaturesData
-from ..dicom_feature_extraction import extract_features_from_dicom
+from ..dicom_feature_extraction import (
+    extract_features_from_dicom,dicom_header_dict)
 from ..constants import text_sep_cols,num_sep_cols,num_cols
 from ..sanitization import sanitize_input,replace_cols,rep_dict
 from typing import Tuple,List
 
-def process_column(x):
-    output = {}
-    for k in x.columns:
-        O = []
-        for y in x[k]:
-            y = str(y).replace(";"," ")
-            if y == "nan":
-                y = "-"
-            if y not in O:
-                O.append(y)
-        output[k] = [" ".join(O)]
-    output["number_of_images"] = x.shape[0]
-    return po.from_dict(output)
+def summarise_columns(x):
+    cols = x.columns
+    group_cols = ["study_uid","series_uid"]
+    number_cols = ["number_of_images","number_of_frames"]
+    col_expressions = [
+        (po.col(k)
+         .cast(po.Utf8)
+         .fill_null("-")
+         .str.replace_all(r"^nan$","-")
+         .str.replace_all(r"\\"," ")
+         .str.replace_all(";"," ")
+         .unique()
+         .str.concat(" ")
+         .alias(k))
+        for k in cols 
+        if (k not in group_cols + number_cols) and (k in dicom_header_dict)]
+    if "number_of_images" in x:
+        col_expressions.append(
+            (po.col("number_of_images")
+             .cast(po.Int32)
+             .median()
+             .alias("number_of_images")))
+    elif "number_of_frames" in x:
+        col_expressions.append(
+            (po.col("number_of_frames")
+             .cast(po.Int32)
+             .median()
+             .alias("number_of_images")))
+    elif "number_of_images" not in x:
+        col_expressions.append(
+            po.col("study_uid").len().alias("number_of_images"))
+    col_expressions.extend([po.col(k).alias(k) 
+                            for k in number_cols if k in cols])
+    output = x.groupby(group_cols).agg(col_expressions)
+    return output
+
+def sanitize_input(X,replacements={},strips=[]):
+    X = X.cast(po.Utf8)
+    for k in replacements:
+        X = X.str.replace_all(k,replacements[k])
+    for s in strips:
+        X = X.str.strip(s)
+    X = X.str.to_lowercase()
+    return X
 
 def sanitize_data(data):
-    col_rep = []
-    col_rep.extend([
-        po.Series(name=k,
-                  values=sanitize_input(data[k],rep_dict,[" "]))
-        for k in text_sep_cols])
-    col_rep.extend([
-        po.Series(name=k,
-                  values=sanitize_input(data[k],rep_dict,[" "]))
-        for k in num_sep_cols])
-    col_rep.extend([
-        po.when(data[k] == "").then(replace_cols[k]).otherwise(data[k])
-        for k in replace_cols])
-    data = data.with_columns(col_rep)
+    col_expr_sep = []
+    col_expr_rep = []
+    all_sep_cols = text_sep_cols + num_sep_cols
+    all_sep_cols = list(set(all_sep_cols))
+    for k in all_sep_cols:
+        col = sanitize_input(po.col(k),rep_dict,[" "]).alias(k)
+        col_expr_sep.append(col)
+    for k in replace_cols:
+        col = (po.when(col == "")
+               .then(replace_cols[k])
+               .otherwise(col)
+               .alias(k))
+        col_expr_rep.append(col)
+    data = data.with_columns(col_expr_sep)
+    data = data.with_columns(col_expr_rep)
     return data
 
 def get_heuristics(features:po.DataFrame)->Tuple[List[bool],
@@ -64,7 +97,9 @@ def get_heuristics(features:po.DataFrame)->Tuple[List[bool],
         it = it.lower()
         sd = sd.lower()
         f = [float(x) if x.replace(".","").isnumeric() else 0 
-                for x in np.unique(f.split())]
+             for x in np.unique(f.split())]
+        if len(f) == 0:
+            f = 0
         f = np.int32(f).max()
         # check if it can be t2w ("t2" substring in sd AND no 
         # "cor" or "sag" substring)
@@ -80,11 +115,33 @@ def get_heuristics(features:po.DataFrame)->Tuple[List[bool],
         else:
             is_dwi_bool_idx.append(False)
         # check if it can be adc ("adc" substring in it)
-        if "adc" in it:
+        if ("adc" in it) or ("adc" in sd.split(" ")):
             is_adc_bool_idx.append(True)
         else:
             is_adc_bool_idx.append(False)
-    return is_t2w_bool_idx,is_adc_bool_idx,is_dwi_bool_idx
+    heuristics_df = po.DataFrame({
+        "study_uid":features["study_uid"],
+        "series_uid":features["series_uid"],
+        "t2w_heuristics":is_t2w_bool_idx,
+        "adc_heuristics":is_adc_bool_idx,
+        "dwi_heuristics":is_dwi_bool_idx})
+    return heuristics_df
+
+def get_consensus_predictions(all_predictions:List[np.ndarray])->List[str]:
+    """Calculates consensus predictions (mode) from a list of prediction 
+    vectors.
+
+    Args:
+        all_predictions (List[np.ndarray]): list of prediction vectors.
+
+    Returns:
+        List[str]: consensus predictions.
+    """
+    consensus_pred = po.DataFrame(
+        np.concatenate(all_predictions,axis=1))
+    consensus_pred = consensus_pred.to_pandas().mode(1).iloc[:,0]
+    consensus_pred = [x.upper() for x in consensus_pred]
+    return consensus_pred
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -99,25 +156,22 @@ if __name__ == "__main__":
     
     # if it's a directory, assume it's a directory containing .dcm files
     if os.path.isdir(args.input_path) == True:
-        # load dicom headers
+        # load dicom metadata
         features = extract_features_from_dicom(args.input_path)
         features = {k:[features[k]] for k in features}
         features = po.from_dict(features)
     elif args.input_path.split(".")[-1] in ["tsv","csv"]:
         sep = "\t" if args.input_path[-3:] == "tsv" else ","
         features = po.read_csv(args.input_path,sep=sep,ignore_errors=True)
-        number_of_images = features.shape[0]
         features.columns = [x.replace(" ","_") for x in features.columns]
-        features = features.groupby(["study_uid","series_uid"]).apply(
-            process_column)
+        features = summarise_columns(features)
+    elif args.input_path.split(".")[-1] == "parquet":
+        features = po.read_parquet(args.input_path)
+        features.columns = [x.replace(" ","_") for x in features.columns]
+        features = summarise_columns(features)
     features = sanitize_data(features)
-    
-    # calculate heuristics
-    heuristics = get_heuristics(features)
-    is_t2w_bool_idx = heuristics[0]
-    is_adc_bool_idx = heuristics[1]
-    is_dwi_bool_idx = heuristics[2]
-    
+    features = features.sort(by=["study_uid","series_uid"])
+        
     # setup models
     all_predictions = []
     match = ["ADC","DCE","DWI","Others","T2"]
@@ -128,6 +182,8 @@ if __name__ == "__main__":
         all_patient_id = features["patient_id"]
     else:
         all_patient_id = features["study_uid"]
+    
+    # predict
     for model_path in args.model_paths:
         model = dill.load(open(model_path,"rb"))
         for fold in model["cv"]:
@@ -154,20 +210,30 @@ if __name__ == "__main__":
                 prediction = fold["model"].predict(dat)
                 all_predictions_fold.append(prediction.astype(str))
 
-    consensus_pred = po.DataFrame(
-        np.concatenate(all_predictions_fold,axis=1))
-    consensus_pred = consensus_pred.to_pandas().mode(1).iloc[:,0]
-    consensus_pred = [x.upper() for x in consensus_pred]
-    consensus_pred_heuristics = consensus_pred.copy()
-    # apply heuristics
-    consensus_pred_heuristics = np.where(
-        is_t2w_bool_idx,"T2",consensus_pred_heuristics)
-    consensus_pred_heuristics = np.where(
-        is_adc_bool_idx,"ADC",consensus_pred_heuristics)
-    consensus_pred_heuristics = np.where(
-        is_dwi_bool_idx,"DWI",consensus_pred_heuristics)
-    for se,st,pa,p,ph in zip(all_series_uid,all_study_uid,all_patient_id,
-                             consensus_pred,consensus_pred_heuristics):
-        print("{patient_id},{study_uid},{series_uid},{pred},{pred_heur}".format(
-            patient_id=pa,study_uid=st,
-            series_uid=se,pred=p,pred_heur=ph))
+    # aggregate prediction consensus
+    consensus_pred = get_consensus_predictions(all_predictions_fold)
+    
+    # calculate heuristics
+    heuristics_df = get_heuristics(features)
+    
+    # merge predictions with heuristics
+    predictions_df = (po.from_dict({
+        "patient_id":features["series_uid"],
+        "study_uid":features["study_uid"],
+        "series_uid":features["series_uid"],
+        "prediction":consensus_pred}).join(heuristics_df,
+                                           on=["study_uid","series_uid"])
+        .with_columns(po.col("prediction").alias("prediction_heuristics"))
+        .with_columns(po.when(po.col("t2w_heuristics") == True)
+                      .then("T2")
+                      .when(po.col("dwi_heuristics") == True)
+                      .then("DWI")
+                      .when(po.col("adc_heuristics") == True)
+                      .then("ADC")
+                      .otherwise(po.col("prediction_heuristics"))
+                      .alias("prediction_heuristics"))
+        .select(["patient_id","study_uid","series_uid",
+                 "prediction","prediction_heuristics"]))
+    
+    # print predctions
+    print(predictions_df.to_pandas().to_csv(header=None,index=False))
