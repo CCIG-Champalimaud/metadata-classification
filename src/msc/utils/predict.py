@@ -1,4 +1,5 @@
 import argparse
+import json
 import dill
 import numpy as np
 import polars as po
@@ -10,10 +11,75 @@ from ..constants import text_sep_cols,num_sep_cols,num_cols
 from ..sanitization import sanitize_input,replace_cols,rep_dict
 from typing import Tuple,List
 
+def read_data(input_paths):
+    def read_data_dicom(input_path):
+        features = extract_features_from_dicom(input_path)
+        features = {k:[features[k]] for k in features}
+        features = po.from_dict(features)
+        return features
+
+    def read_data_csv_tsv(input_path):
+        sep = "\t" if input_path[-3:] == "tsv" else ","
+        features = po.read_csv(input_path,sep=sep,ignore_errors=True)
+        features.columns = [x.replace(" ","_") for x in features.columns]
+        return features
+
+    def read_parquet(input_path):
+        features = po.read_parquet(input_path)
+        features.columns = [x.replace(" ","_") for x in features.columns]
+        return features
+
+    def read_json(input_path):
+        json_file = json.load(open(input_path,"r"))
+        output_dict = {"patient_id":[],
+                       "study_uid":[],
+                       "series_uid":[]}
+        for patient_id in json_file:
+            for study_uid in json_file[patient_id]:
+                for series_uid in json_file[patient_id][study_uid]:
+                    md_dict = json_file[patient_id][study_uid][series_uid]
+                    for metadata_key in md_dict:
+                        if all([metadata_key in dicom_header_dict,
+                                metadata_key != "patient_id",
+                                metadata_key != "study_uid",
+                                metadata_key != "series_uid"]):
+                            if metadata_key not in output_dict:
+                                output_dict[metadata_key] = []
+                            values = md_dict[metadata_key]
+                            output_dict[metadata_key].extend(values)
+                    pid = [patient_id for _ in values]
+                    stid = [study_uid for _ in values]
+                    seid = [series_uid for _ in values]
+                    output_dict["patient_id"].extend(pid)
+                    output_dict["study_uid"].extend(stid)
+                    output_dict["series_uid"].extend(seid)
+        features = po.from_dict(output_dict)
+        return features
+
+    all_features = []
+    for input_path in input_paths:
+        extension = input_path.split(".")[-1]
+        if os.path.isdir(input_path) == True:
+        # load dicom metadata
+            all_features.append(read_data_dicom(input_path))
+        elif extension in ["tsv","csv"]:
+            all_features.append(read_data_csv_tsv(input_path))
+        elif extension == "parquet":
+            all_features.append(read_parquet(input_path))
+        elif extension == "json":
+            all_features.append(read_json(input_path))
+        else:
+            raise NotImplementedError(
+                "Input must be DICOM series dir or csv, tsv or parquet file")
+    all_features = po.concat(all_features,how="vertical")
+    all_features = summarise_columns(all_features)
+    return all_features
+
 def summarise_columns(x):
     cols = x.columns
     group_cols = ["study_uid","series_uid"]
-    number_cols = ["number_of_images","number_of_frames"]
+    if "patient_id" in x:
+        group_cols.append("patient_id")
     col_expressions = [
         (po.col(k)
          .cast(po.Utf8)
@@ -22,16 +88,14 @@ def summarise_columns(x):
          .str.replace_all(r"\\"," ")
          .str.replace_all(";"," ")
          .unique()
-         .str.concat(" ")
-         .alias(k))
+         .str.concat(" "))
         for k in cols 
-        if (k not in group_cols + number_cols) and (k in dicom_header_dict)]
+        if (k not in group_cols) and (k in dicom_header_dict)]
     if "number_of_images" in x:
         col_expressions.append(
             (po.col("number_of_images")
              .cast(po.Int32)
-             .median()
-             .alias("number_of_images")))
+             .median()))
     elif "number_of_frames" in x:
         col_expressions.append(
             (po.col("number_of_frames")
@@ -41,8 +105,6 @@ def summarise_columns(x):
     elif "number_of_images" not in x:
         col_expressions.append(
             po.col("study_uid").len().alias("number_of_images"))
-    col_expressions.extend([po.col(k).alias(k) 
-                            for k in number_cols if k in cols])
     output = x.groupby(group_cols).agg(col_expressions)
     return output
 
@@ -147,7 +209,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Predicts the type of sequence.")
     
-    parser.add_argument("--input_path",required=True,
+    parser.add_argument("--input_paths",required=True,nargs="+",
                         help="Path to DICOM directory or CSV/TSV containing data")
     parser.add_argument("--model_paths",required=False,nargs="+",
                         help="Path to model")
@@ -155,23 +217,10 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     # if it's a directory, assume it's a directory containing .dcm files
-    if os.path.isdir(args.input_path) == True:
-        # load dicom metadata
-        features = extract_features_from_dicom(args.input_path)
-        features = {k:[features[k]] for k in features}
-        features = po.from_dict(features)
-    elif args.input_path.split(".")[-1] in ["tsv","csv"]:
-        sep = "\t" if args.input_path[-3:] == "tsv" else ","
-        features = po.read_csv(args.input_path,sep=sep,ignore_errors=True)
-        features.columns = [x.replace(" ","_") for x in features.columns]
-        features = summarise_columns(features)
-    elif args.input_path.split(".")[-1] == "parquet":
-        features = po.read_parquet(args.input_path)
-        features.columns = [x.replace(" ","_") for x in features.columns]
-        features = summarise_columns(features)
+    features = read_data(args.input_paths)
     features = sanitize_data(features)
     features = features.sort(by=["study_uid","series_uid"])
-        
+
     # setup models
     all_predictions = []
     match = ["ADC","DCE","DWI","Others","T2"]
@@ -217,8 +266,12 @@ if __name__ == "__main__":
     heuristics_df = get_heuristics(features)
     
     # merge predictions with heuristics
+    if "patient_id" in features:
+        patient_id = features["patient_id"]
+    else:
+        patient_id = features["study_uid"]
     predictions_df = (po.from_dict({
-        "patient_id":features["series_uid"],
+        "patient_id":patient_id,
         "study_uid":features["study_uid"],
         "series_uid":features["series_uid"],
         "prediction":consensus_pred}).join(heuristics_df,
@@ -236,4 +289,4 @@ if __name__ == "__main__":
                  "prediction","prediction_heuristics"]))
     
     # print predctions
-    print(predictions_df.to_pandas().to_csv(header=None,index=False))
+    print(predictions_df.to_pandas().to_csv(index=False))
