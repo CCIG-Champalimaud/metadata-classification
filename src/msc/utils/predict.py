@@ -71,7 +71,10 @@ def read_data(input_paths):
         else:
             raise NotImplementedError(
                 "Input must be DICOM series dir or csv, tsv or parquet file")
-    all_features = po.concat(all_features,how="vertical")
+    if len(all_features) > 1:
+        all_features = po.concat(all_features,how="vertical")
+    else:
+        all_features = all_features[0]
     all_features = summarise_columns(all_features)
     return all_features
 
@@ -126,9 +129,9 @@ def sanitize_data(data):
         col = sanitize_input(po.col(k),rep_dict,[" "]).alias(k)
         col_expr_sep.append(col)
     for k in replace_cols:
-        col = (po.when(col == "")
+        col = (po.when(po.col(k) == "")
                .then(replace_cols[k])
-               .otherwise(col)
+               .otherwise(po.col(k))
                .alias(k))
         col_expr_rep.append(col)
     data = data.with_columns(col_expr_sep)
