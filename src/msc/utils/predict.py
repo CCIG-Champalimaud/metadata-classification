@@ -165,7 +165,7 @@ def get_heuristics(features:po.DataFrame)->Tuple[List[bool],
              for x in np.unique(f.split())]
         if len(f) == 0:
             f = 0
-        f = np.int32(f).max()
+        f = np.max(np.int32(f))
         # check if it can be t2w ("t2" substring in sd AND no 
         # "cor" or "sag" substring)
         if ("t2" in sd) and ("cor" not in sd) and ("sag" not in sd):
@@ -267,7 +267,7 @@ if __name__ == "__main__":
     
     # calculate heuristics
     heuristics_df = get_heuristics(features)
-    
+
     # merge predictions with heuristics
     if "patient_id" in features:
         patient_id = features["patient_id"]
