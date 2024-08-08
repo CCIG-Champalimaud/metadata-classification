@@ -1,0 +1,1086 @@
+---
+title: "Analysis of automated curation tool"
+format: pdf
+editor: visual
+author: 
+  - name: José Guilherme de Almeida
+    affiliations: 
+      - ref: champ
+  - name: Nickolas Papanikolaou
+    affiliations:
+      - ref: champ
+
+affiliations:
+  - id: champ
+    name: Champalimaud Foundation
+    address: Centre for the Unknown
+    postal-code: 1400-038 
+    city: Lisbon
+    country: Portugal
+
+execute:
+  echo: false
+  warning: false
+---
+
+# Data preparation
+
+```{r}
+library(rjson)
+library(caret)
+library(patchwork)
+library(tidyverse)
+
+theme_set(theme(text = element_text(family="Times")))
+
+save_figure <- function(root) {
+  fig_dir <- "figures"
+  dir.create(fig_dir, showWarnings = F)
+  dir.create(sprintf("%s/%s", fig_dir, "png"), showWarnings = F)
+  dir.create(sprintf("%s/%s", fig_dir, "pdf"), showWarnings = F)
+  dir.create(sprintf("%s/%s", fig_dir, "svg"), showWarnings = F)
+  ggsave(sprintf("%s/png/%s.png", fig_dir, root), dpi = 300)
+  ggsave(sprintf("%s/pdf/%s.pdf", fig_dir, root))
+  ggsave(sprintf("%s/svg/%s.svg", fig_dir, root))
+}
+
+all_results <- read_csv(
+  file = "data_output/metrics.csv",
+  col_types = c(col_character(), col_character(), col_character(),
+                col_number(), col_character(), col_character(),
+                col_character(), col_character(), col_character(),
+                col_number()))
+cv_results <- all_results %>%
+  subset(split == "cv")
+test_results <- all_results %>%
+  subset(split == "test_consensus")
+
+all_figures <- list()
+```
+
+# CV results
+
+```{r}
+exclusion_conversion <- c(
+  `percent_phase_field_of_view:sar:series_description` = "W/o SD/%FOV/SAR",
+  `percent_phase_field_of_view:sar` = "W/o %FOV/SAR",
+  series_description = "W/o SD",
+  standard = "All features"
+)
+
+series_conversion <- c(
+  t2 = "T2W",
+  dwi = "DWI",
+  adc = "ADC",
+  dce = "DCE",
+  others = "Others",
+  `weighted avg` = "Weighted avg.",
+  `macro avg` = "Macro avg."
+)
+
+metric_conversion <- c(
+  precision = "Precision",
+  recall = "Recall",
+  `f1-score` = "F1-score"
+)
+```
+
+## Frequency based metrics
+
+```{r}
+#| fig.height: 4.5
+#| fig.width: 6.5
+all_figures$cv_figure <- cv_results %>%
+  filter(fraction == 100,
+         metric %in% c("precision", "recall", "f1-score"),
+         set %in% c("t2", "dwi", "adc", "dce", "others")) %>%
+  mutate(exclusion = factor(exclusion,
+                            rev(names(exclusion_conversion)), 
+                            rev(exclusion_conversion)),
+         set = factor(set, 
+                      names(series_conversion), 
+                      series_conversion),
+         metric = factor(metric, 
+                         names(metric_conversion), 
+                         metric_conversion)) %>%
+  ggplot(aes(x = value, y = exclusion, colour = model)) +
+  stat_summary(fun.data = mean_se,
+               position = position_dodge(width = 0.8), size = 0.25) +
+  theme_classic(base_size = 8, base_family = "Helvetica") + 
+  theme(strip.text.y = element_text(angle = 0, hjust = 0, vjust = 0.5),
+        strip.background = element_blank(),
+        legend.position = "bottom",
+        panel.spacing.x = unit(0.75, "line")) +
+  facet_grid(set ~ metric, scales = "free_x") + 
+  scale_colour_brewer(palette = "Set1",
+                      name = "Model") + 
+  xlab("Value") +
+  ylab("Feature set")
+
+all_figures$cv_figure
+
+save_figure("cv_metrics")
+```
+
+## Confusion matrix
+
+```{r}
+#| fig.height: 4.5
+#| fig.width: 6
+all_figures$cv_cm <- cv_results %>%
+  filter(fraction == 100,
+         metric == "cm") %>%
+  mutate(exclusion = factor(exclusion,
+                            names(exclusion_conversion), 
+                            exclusion_conversion),
+         true = factor(true, series_conversion),
+         pred = factor(pred, series_conversion)) %>%
+  group_by(true, exclusion, model) %>%
+  mutate(Total = sum(value)) %>%
+  group_by(true, pred, Total, exclusion, model) %>%
+  summarise(N = sum(value),
+            .groups = "drop") %>%
+  ggplot(aes(x = true, y = pred, fill = N / Total,
+             label = sprintf("%.2f%%", N / Total * 100))) +
+  geom_tile() +
+  geom_label(label.r = unit(0, "line"),
+             label.size = unit(0, "line"),
+             label.padding = unit(0.05, "line"),
+             alpha = 0.5,
+             size = 2,
+             fill = "white") +
+  theme_classic(base_size = 8, base_family="Helvetica") + 
+  theme(strip.text.y = element_text(angle = 0, hjust = 0, vjust = 0.5),
+        strip.background = element_blank(),
+        legend.position = "bottom",
+        panel.spacing.x = unit(0.75, "line"),
+        legend.key.height = unit(0.5, "line"),
+        legend.title = element_text(vjust = 1)) +
+  facet_grid(exclusion ~ model) + 
+  scale_fill_distiller(palette = 2, name = "Frequency",
+                       labels = function(x) sprintf("%.0f%%", x * 100)) +
+  xlab("Observed") +
+  ylab("Predicted") + 
+  scale_x_discrete(expand = c(0, 0)) +
+  scale_y_discrete(expand = c(0, 0))
+
+all_figures$cv_cm
+
+save_figure("cv_confusion_matrix")
+```
+
+## Learning curves
+
+```{r}
+#| fig.height: 7
+#| fig.width: 6.5
+
+lc_plots <- lapply(c("precision", "recall", "f1-score"), function(x) {
+  cv_results %>%
+    filter(metric == x,
+           set %in% c("t2", "dwi", "adc", "dce", "others")) %>%
+    mutate(exclusion = factor(exclusion,
+                              names(exclusion_conversion), 
+                              exclusion_conversion),
+           set = factor(set, 
+                        names(series_conversion), 
+                        series_conversion),
+           metric = factor(metric, 
+                           names(metric_conversion), 
+                           metric_conversion)) %>%
+    group_by(metric, set, fraction, exclusion, model) %>%
+    summarise(value = mean(value),
+              .groups = "drop") %>%
+    ggplot(aes(x = fraction, y = value, colour = set)) +
+    geom_line(size = 0.5) +
+    theme_classic(base_size = 8, base_family="Helvetica") + 
+    theme(strip.text.y = element_text(angle = 0, hjust = 0, vjust = 0.5),
+          strip.background = element_blank(),
+          legend.position = "bottom",
+          panel.spacing.x = unit(1.25, "line"),
+          legend.key.height = unit(0.5, "line"),
+          axis.line.y = element_blank(),
+          panel.grid.major.y = element_line(size = 0.25),
+          panel.background = element_rect(linewidth = 0.25, colour = "black", fill = NA)) +
+    facet_grid(model ~ exclusion) + 
+    scale_colour_brewer(palette = "Set1",
+                        name = NULL) + 
+    xlab("Fraction of data") +
+    ylab("Value") + 
+    scale_x_continuous(labels = function(x) sprintf("%s%%", x),
+                       expand = c(0,0), limits = c(NA, NA),
+                       trans = "log10") + 
+    ylab(metric_conversion[x]) 
+})
+
+nl <- theme(legend.position = "none",
+            axis.title.x = element_blank())
+
+all_figures$learning_curves <- (lc_plots[[1]] + nl) / 
+  (lc_plots[[2]] + nl) / 
+  lc_plots[[3]]
+
+all_figures$learning_curves
+
+save_figure("learning_curves")
+```
+# Test results
+
+```{r}
+#| fig.height: 4.5
+#| fig.width: 6.5
+all_figures$test_figure <- test_results %>%
+  filter(fraction == 100,
+         metric %in% c("precision", "recall", "f1-score"),
+         set %in% c("t2", "dwi", "adc", "dce", "others")) %>%
+  mutate(exclusion = factor(exclusion,
+                            rev(names(exclusion_conversion)), 
+                            rev(exclusion_conversion)),
+         set = factor(set, 
+                      names(series_conversion), 
+                      series_conversion),
+         metric = factor(metric, 
+                         names(metric_conversion), 
+                         metric_conversion)) %>%
+  ggplot(aes(x = value, y = exclusion, colour = model)) +
+  stat_summary(geom = "point",
+               fun.data = mean_se,
+               position = position_dodge(width = 0.8), size = 0.25) +
+  theme_classic(base_size = 8, base_family="Helvetica") + 
+  theme(strip.text.y = element_text(angle = 0, hjust = 0, vjust = 0.5),
+        strip.background = element_blank(),
+        legend.position = "bottom",
+        panel.spacing.x = unit(0.75, "line"),
+        panel.background = element_rect(fill = NA, colour = "black", linewidth = 0.1)) +
+  facet_grid(set ~ metric, scales = "free_x") + 
+  scale_colour_brewer(palette = "Set1",
+                      name = "Model") + 
+  xlab("Value") +
+  ylab("Feature set")
+
+all_figures$test_figure
+
+save_figure("test_metrics")
+```
+
+```{r}
+#| fig.height: 4.5
+#| fig.width: 6
+all_figures$test_cm <- test_results %>%
+  filter(fraction == 100,
+         metric == "cm") %>%
+  mutate(exclusion = factor(exclusion,
+                            names(exclusion_conversion), 
+                            exclusion_conversion),
+         true = factor(true, series_conversion),
+         pred = factor(pred, series_conversion)) %>%
+  group_by(true, exclusion, model) %>%
+  mutate(Total = sum(value)) %>%
+  group_by(true, pred, Total, exclusion, model) %>%
+  summarise(N = sum(value),
+            .groups = "drop") %>%
+  ggplot(aes(x = true, y = pred, fill = N / Total,
+             label = sprintf("%.2f%%", N / Total * 100))) +
+  geom_tile() +
+  geom_label(label.r = unit(0, "line"),
+             label.size = unit(0, "line"),
+             label.padding = unit(0.05, "line"),
+             alpha = 0.5,
+             size = 2,
+             fill = "white") +
+  theme_classic(base_size = 8, base_family="Helvetica") + 
+  theme(strip.text.y = element_text(angle = 0, hjust = 0, vjust = 0.5),
+        strip.background = element_blank(),
+        legend.position = "bottom",
+        panel.spacing.x = unit(0.75, "line"),
+        legend.key.height = unit(0.5, "line"),
+        legend.title = element_text(vjust = 1)) +
+  facet_grid(exclusion ~ model) + 
+    scale_fill_distiller(palette = 2, name = "Frequency", labels = function(x) sprintf("%.0f%%", x * 100)) +
+  xlab("Observed") +
+  ylab("Predicted") + 
+  scale_x_discrete(expand = c(0, 0)) +
+  scale_y_discrete(expand = c(0, 0))
+
+all_figures$test_cm
+
+save_figure("test_confusion_matrix")
+```
+
+## Linear analysis
+
+```{r}
+library(knitr)
+
+test_perf <- test_results %>%
+  subset(set %in% c("t2", "dwi", "dce", "adc", "others") & 
+           fraction == 100)
+for (m in c("precision", "recall", "f1-score")) {
+  print(m)
+  tmp_df <- test_perf %>%
+    subset(metric == m)
+  P <- summary(
+    glm(value ~ model + relevel(factor(exclusion), "standard") + set - 1, data = tmp_df))$coefficients %>%
+    as.data.frame()
+  P$coef <- rownames(P)
+  P <- dplyr::select(P, coef, Estimate, `Std. Error`, `t value`, `Pr(>|t|)`)
+  P[,2:5] <- signif(P[,2:5],3)
+  rownames(P) <- NULL
+  P %>%
+    apply(1, function(x) paste(x, collapse = ",")) %>%
+    paste(collapse = "\n") %>%
+    cat
+  print("")
+}
+```
+
+## Learning curves
+
+```{r}
+#| fig.height: 7
+#| fig.width: 6.5
+
+library(segmented)
+
+get_bp <- function(x, y) {
+  my.lm <- lm(y ~ x + 1)
+  my.seg <- segmented(my.lm, 
+                      seg.Z = ~ x, 
+                      psi = list(x = 10))
+  
+  if (pscore.test(my.lm,  seg.Z = ~ x, alternative = "less")$p.val < 0.05) {
+    lm.2 <- lm(y[x > my.seg$psi[2]] ~ x[x > my.seg$psi[2]] + 1)
+    if (summary(lm.2)$coefficients[2,4] > 0.05) {
+      return(my.seg$psi[2])
+    }
+  }
+  return(NA)
+}
+
+lc_plots <- lapply(c("precision", "recall", "f1-score"), function(x) {
+  tmp_df <- test_results %>%
+    filter(metric == x,
+           set %in% c("t2", "dwi", "adc", "dce", "others")) %>%
+    mutate(exclusion = factor(exclusion,
+                              names(exclusion_conversion), 
+                              exclusion_conversion),
+           set = factor(set, 
+                        names(series_conversion), 
+                        series_conversion),
+           metric = factor(metric, 
+                           names(metric_conversion), 
+                           metric_conversion)) %>%
+    group_by(metric, set, fraction, exclusion, model) %>%
+    summarise(value = mean(value),
+              .groups = "drop") 
+  
+  bp_set <- tmp_df %>%
+    group_by(model, exclusion) %>%
+    summarise(bp = get_bp(x = fraction, y = value),
+              .groups = "drop")
+  
+  tmp_df %>%
+    ggplot(aes(x = fraction, y = value, colour = set)) +
+    geom_line(size = 0.5) +
+    geom_rect(data = bp_set, 
+              mapping = aes(xmin = bp, xmax = 100, 
+                            ymin = min(tmp_df$value), ymax = 1),
+              fill = "black",
+              inherit.aes = F,
+              alpha = 0.2) +
+    stat_summary(geom = "smooth",
+                 se = F,
+                 size = 0.5,
+                 colour = "black",
+                 linetype = 2,
+                 fun.data = mean_se) +
+    theme_classic(base_size = 8, base_family="Helvetica") + 
+    theme(strip.text.y = element_text(angle = 0, hjust = 0, vjust = 0.5),
+          strip.background = element_blank(),
+          legend.position = "bottom",
+          panel.spacing.x = unit(1.25, "line"),
+          legend.key.height = unit(0.5, "line"),
+          axis.line = element_blank(),
+          panel.grid.major.y = element_line(size = 0.25),
+          panel.background = element_rect(linewidth = 0.25, colour = "black", fill = NA)) +
+    facet_grid(model ~ exclusion) + 
+    scale_colour_brewer(palette = "Set1",
+                        name = NULL) + 
+    xlab("Fraction of data") +
+    ylab("Value") + 
+    scale_x_continuous(labels = function(x) sprintf("%s%%", x),
+                       expand = c(0,0), limits = c(NA, NA),
+                       trans = "log10") + 
+    ylab(metric_conversion[x]) 
+})
+
+nl <- theme(legend.position = "none",
+            axis.title.x = element_blank())
+
+all_figures$learning_curves_test <- (lc_plots[[1]] + nl) / 
+  (lc_plots[[2]] + nl) / 
+  lc_plots[[3]]
+
+all_figures$learning_curves_test
+
+save_figure("learning_curves_test")
+```
+
+# Leave one group out
+
+## CV results
+
+```{r}
+logo_results <- read_csv(
+  file = "data_output/metrics_logo.csv",
+  col_types = c(col_character(), col_character(), col_character(),
+                col_number(), col_character(), col_character(),
+                col_character(), col_character(), col_character(),
+                col_number()))
+cv_logo_results <- logo_results %>%
+  subset(split == "cv")
+test_logo_results <- logo_results %>%
+  subset(split == "test_consensus")
+```
+
+### Frequency based metrics
+
+```{r}
+#| fig.height: 4.5
+#| fig.width: 6.5
+all_figures$cv_logo_figure <- cv_logo_results %>%
+  filter(fraction == 1,
+         metric %in% c("precision", "recall", "f1-score"),
+         set %in% c("t2", "dwi", "adc", "dce", "others")) %>%
+  mutate(exclusion = factor(exclusion,
+                            rev(names(exclusion_conversion)), 
+                            rev(exclusion_conversion)),
+         set = factor(set, 
+                      names(series_conversion), 
+                      series_conversion),
+         metric = factor(metric, 
+                         names(metric_conversion), 
+                         metric_conversion)) %>%
+  ggplot(aes(x = value, y = exclusion, colour = model)) +
+  stat_summary(fun.data = mean_se,
+               position = position_dodge(width = 0.8), size = 0.25) +
+  theme_classic(base_size = 8, base_family="Helvetica") + 
+  theme(strip.text.y = element_text(angle = 0, hjust = 0, vjust = 0.5),
+        strip.background = element_blank(),
+        legend.position = "bottom",
+        panel.spacing.x = unit(0.75, "line")) +
+  facet_grid(set ~ metric, scales = "free_x") + 
+  scale_colour_brewer(palette = "Set1",
+                      name = "Model") + 
+  xlab("Value") +
+  ylab("Feature set")
+
+all_figures$cv_logo_figure
+
+save_figure("logo_metrics")
+```
+
+```{r}
+#| fig.height: 4.5
+#| fig.width: 6.5
+all_figures$cv_logo_weighted <- cv_logo_results %>%
+  group_by(model, exclusion,fold) %>%
+  mutate(N = sum(value[metric == "cm"])) %>%
+  filter(fraction == 1,
+         metric %in% c("precision", "recall", "f1-score"),
+         set %in% c("t2", "dwi", "adc", "dce", "others")) %>%
+  mutate(exclusion = factor(exclusion,
+                            rev(names(exclusion_conversion)), 
+                            rev(exclusion_conversion)),
+         set = factor(set, 
+                      names(series_conversion), 
+                      series_conversion),
+         metric = factor(metric, 
+                         names(metric_conversion), 
+                         metric_conversion)) %>%
+  group_by(model, exclusion, set, metric) %>%
+  summarise(value_weighted = sum(value * N) / sum(N),
+            value_sd = sd(value),
+            value = mean(value)) %>%
+  ggplot(aes(x = value, y = exclusion, colour = model, yend = exclusion,
+             group = paste(model))) +
+  geom_point(aes(shape = "Mean"),
+             position = position_dodge(width = 1.0)) +
+  geom_point(aes(x = value_weighted, shape = "Weighted mean"),
+             position = position_dodge(width = 1.0)) +
+  theme_classic(base_size = 8, base_family="Helvetica") + 
+  theme(strip.text.y = element_text(angle = 0, hjust = 0, vjust = 0.5),
+        strip.background = element_blank(),
+        legend.position = "bottom",
+        panel.spacing.x = unit(0.75, "line"),
+        legend.key.size = unit(0, "line")) +
+  facet_grid(set ~ metric, scales = "free_x") + 
+  xlab("Value") +
+  ylab("Feature set") + 
+  scale_shape_manual(values = c(Mean = "circle", 
+                                `Weighted mean` = "cross"),
+                     name = NULL) + 
+  scale_colour_brewer(palette = "Set1",
+                      name = "Model") + 
+  scale_x_continuous(limits = c(NA, 1)) + 
+  guides(colour = guide_legend(ncol = 1),
+         shape = guide_legend(ncol = 1))
+
+all_figures$cv_logo_weighted
+
+save_figure("logo_metrics_weighted")
+```
+
+```{r}
+library(knitr)
+
+merged_perf <- merge(
+  cv_results %>%
+    subset(metric != "cm" & fraction == 100) %>%
+    dplyr::select(-true, -pred) %>%
+    group_by(model, exclusion, metric, set, split, fraction) %>%
+    summarise(value = mean(value), .groups = "drop"), 
+  cv_logo_results %>%
+    subset(metric != "cm") %>%
+    dplyr::select(-true, -pred) %>%
+    group_by(model, exclusion, metric, set, split, fraction) %>%
+    summarise(logo_value = mean(value), .groups = "drop"), 
+  by = c("model", "exclusion", "metric", "set", "split")) %>%
+  mutate(D = logo_value - value) %>%
+  subset(set %in% c("t2", "dwi", "dce", "adc", "others"))
+for (m in c("precision", "recall", "f1-score")) {
+  tmp_df <- merged_perf %>%
+    subset(metric == m)
+  summary(glm(D ~ model + relevel(factor(exclusion), "standard") + set - 1, data = tmp_df))$coefficients %>%
+    kable %>%
+    print
+}
+```
+
+### Confusion matrix
+
+```{r}
+#| fig.height: 4.5
+#| fig.width: 6
+all_figures$cv_logo_cm <- cv_logo_results %>%
+  filter(fraction == 1,
+         metric == "cm") %>%
+  mutate(exclusion = factor(exclusion,
+                            names(exclusion_conversion), 
+                            exclusion_conversion),
+         true = factor(true, series_conversion),
+         pred = factor(pred, series_conversion)) %>%
+  group_by(true, exclusion, model) %>%
+  mutate(Total = sum(value)) %>%
+  group_by(true, pred, Total, exclusion, model) %>%
+  summarise(N = sum(value),
+            .groups = "drop") %>%
+  ggplot(aes(x = true, y = pred, fill = N / Total,
+             label = sprintf("%.2f%%", N / Total * 100))) +
+  geom_tile() +
+  geom_label(label.r = unit(0, "line"),
+             label.size = unit(0, "line"),
+             label.padding = unit(0.05, "line"),
+             alpha = 0.5,
+             size = 2,
+             fill = "white") +
+  theme_classic(base_size = 8, base_family="Helvetica") + 
+  theme(strip.text.y = element_text(angle = 0, hjust = 0, vjust = 0.5),
+        strip.background = element_blank(),
+        legend.position = "bottom",
+        panel.spacing.x = unit(0.75, "line"),
+        legend.key.height = unit(0.5, "line"),
+        legend.title = element_text(vjust = 1)) +
+  facet_grid(exclusion ~ model) + 
+    scale_fill_distiller(palette = 2, name = "Frequency", labels = function(x) sprintf("%.0f%%", x * 100)) +
+  xlab("Observed") +
+  ylab("Predicted") + 
+  scale_x_discrete(expand = c(0, 0)) +
+  scale_y_discrete(expand = c(0, 0))
+
+all_figures$cv_logo_cm
+
+save_figure("logo_confusion_matrix")
+```
+
+```{r}
+#| fig.height: 4.5
+#| fig.width: 3.5
+all_figures$cv_logo_cm_diff <- cv_logo_results %>%
+  filter(fraction == 1,
+         metric == "cm") %>%
+  mutate(exclusion = factor(exclusion,
+                            names(exclusion_conversion), 
+                            exclusion_conversion),
+         true = factor(true, series_conversion),
+         pred = factor(pred, series_conversion)) %>%
+  group_by(true, exclusion, model) %>%
+  mutate(Total = sum(value)) %>%
+  group_by(true, pred, Total, exclusion, model) %>%
+  summarise(N = sum(value),
+            .groups = "drop") %>% spread(key = model, value = N) %>% 
+  mutate(D = catboost - xgb) %>%
+  ggplot(aes(x = true, y = pred, fill = D, label = D)) +
+  geom_tile() +
+  geom_label(label.r = unit(0, "line"),
+             label.size = unit(0, "line"),
+             label.padding = unit(0.05, "line"),
+             alpha = 0.5,
+             size = 2,
+             fill = "white") +
+  theme_classic(base_size = 8, base_family="Helvetica") + 
+  theme(strip.text.y = element_text(angle = 0, hjust = 0, vjust = 0.5),
+        strip.background = element_blank(),
+        legend.position = "bottom",
+        panel.spacing.x = unit(0.75, "line"),
+        legend.key.height = unit(0.5, "line"),
+        legend.title = element_text(vjust = 1)) +
+  facet_grid(exclusion ~ .) + 
+  scale_fill_gradient2(low = "green4", high = "hotpink", mid = "white",midpoint = 0, name = "Frequency") +
+  xlab("Observed") +
+  ylab("Predicted") + 
+  scale_x_discrete(expand = c(0, 0)) +
+  scale_y_discrete(expand = c(0, 0)) + 
+  ggtitle("CatBoost (pink) - XGBoost (green)")
+
+all_figures$cv_logo_cm_diff
+
+save_figure("logo_confusion_matrix_difference")
+```
+
+### Test results
+
+```{r}
+#| fig.height: 4.5
+#| fig.width: 6.5
+all_figures$test_logo_figure <- test_logo_results %>%
+  filter(fraction == 1,
+         metric %in% c("precision", "recall", "f1-score"),
+         set %in% c("t2", "dwi", "adc", "dce", "others")) %>%
+  mutate(exclusion = factor(exclusion,
+                            rev(names(exclusion_conversion)), 
+                            rev(exclusion_conversion)),
+         set = factor(set, 
+                      names(series_conversion), 
+                      series_conversion),
+         metric = factor(metric, 
+                         names(metric_conversion), 
+                         metric_conversion)) %>%
+  ggplot(aes(x = value, y = exclusion, colour = model)) +
+  stat_summary(fun.data = mean_se,
+               position = position_dodge(width = 0.8), size = 0.25) +
+  theme_classic(base_size = 8, base_family="Helvetica") + 
+  theme(strip.text.y = element_text(angle = 0, hjust = 0, vjust = 0.5),
+        strip.background = element_blank(),
+        legend.position = "bottom",
+        panel.spacing.x = unit(0.75, "line"),
+        panel.background = element_rect(fill = NA, colour = "black", linewidth = 0.1)) +
+  facet_grid(set ~ metric, scales = "free_x") + 
+  scale_colour_brewer(palette = "Set1",
+                      name = "Model") + 
+  xlab("Value") +
+  ylab("Feature set")
+
+all_figures$test_logo_figure
+
+save_figure("logo_test_metrics")
+```
+
+```{r}
+#| fig.height: 4.5
+#| fig.width: 6
+all_figures$test_logo_cm <- test_logo_results %>%
+  filter(fraction == 1,
+         metric == "cm") %>%
+  mutate(exclusion = factor(exclusion,
+                            names(exclusion_conversion), 
+                            exclusion_conversion),
+         true = factor(true, series_conversion),
+         pred = factor(pred, series_conversion)) %>%
+  group_by(true, exclusion, model) %>%
+  mutate(Total = sum(value)) %>%
+  group_by(true, pred, Total, exclusion, model) %>%
+  summarise(N = sum(value),
+            .groups = "drop") %>%
+  ggplot(aes(x = true, y = pred, fill = N / Total,
+             label = sprintf("%.2f%%", N / Total * 100))) +
+  geom_tile() +
+  geom_label(label.r = unit(0, "line"),
+             label.size = unit(0, "line"),
+             label.padding = unit(0.05, "line"),
+             alpha = 0.5,
+             size = 2,
+             fill = "white") +
+  theme_classic(base_size = 8, base_family="Helvetica") + 
+  theme(strip.text.y = element_text(angle = 0, hjust = 0, vjust = 0.5),
+        strip.background = element_blank(),
+        legend.position = "bottom",
+        panel.spacing.x = unit(0.75, "line"),
+        legend.key.height = unit(0.5, "line"),
+        legend.title = element_text(vjust = 1)) +
+  facet_grid(exclusion ~ model) + 
+    scale_fill_distiller(palette = 2, name = "Frequency",
+                         labels = function(x) sprintf("%.0f%%", x * 100)) +
+  xlab("Observed") +
+  ylab("Predicted") + 
+  scale_x_discrete(expand = c(0, 0)) +
+  scale_y_discrete(expand = c(0, 0))
+
+all_figures$test_logo_cm
+
+save_figure("logo_test_confusion_matrix")
+```
+
+# Feature importance
+
+This was not included in the publication as there were no significant trends detected.
+
+```{r}
+feature_importances <- read_csv("data_output/feature_importances.csv")
+```
+
+```{r}
+#| fig.height: 6
+#| fig.width: 6
+feature_importance_df <- feature_importances %>%
+  subset(exclusion == "standard") %>% 
+  mutate(feature_clean = ifelse(model == "xgb" & feature != "number_of_images",
+                                str_match(feature, "[a-zA-Z0-9_]+(?=:)"),
+                                feature),
+         sub_feature = ifelse(model == "xgb" & feature != "number_of_images",
+                              str_match(feature, "(?<=:)[a-zA-Z0-9_]+"),
+                              "")) %>%
+  mutate(feature_clean = feature_clean %>% 
+           str_replace_all("_", " ") %>% 
+           str_to_sentence) %>% 
+  mutate(feature_clean = case_match(feature_clean, 
+                                    "Sar" ~ "SAR", 
+                                    "Mr acquisition type" ~ "MR acquisition type",
+                                    "Percent phase field of view" ~ "%FOV",
+                                    .default = feature_clean)) %>% 
+  mutate(sub_feature = ifelse(sub_feature %in% c("sum", "length", "min", "max", "mean"),
+                              sprintf("+%s", sub_feature),
+                              sub_feature)) %>% 
+  mutate(class = factor(class, c("T2W", "DWI", "ADC", "DCE", "Others"))) %>% 
+  subset(abs(value) > 0.0 & fraction == 100) %>%
+  group_by(exclusion, feature_clean, model, class) %>%
+  mutate(value = value[which.max(abs(value))]) %>%
+  group_by(exclusion, model, class, fold) %>%
+  mutate(ranking = order(abs(value), decreasing = T)) %>%
+  group_by(exclusion, feature_clean, model, class) %>%
+  summarise(ranking = min(ranking),
+            direction = sign(value[which.max(abs(value))]),
+            sub_feature = sub_feature[which.max(abs(value))],
+            value = max(abs(value)),
+            feature = feature[1],
+            .groups = "drop") %>%
+  group_by(model, exclusion, class) %>%
+  filter(ranking <= 10) %>%
+  group_by(model, exclusion, ranking, feature_clean) %>%
+  mutate(sub_feature = ifelse(model == "xgb",
+                              paste(sprintf("%s (%s)", sub_feature, class) ,collapse = "; "),
+                              sub_feature)) %>%
+  mutate(exclusion = factor(exclusion, 
+                            names(exclusion_conversion), 
+                            exclusion_conversion)) %>%
+  group_by(feature_clean, model, exclusion, ranking) %>%
+  arrange(sub_feature) %>%
+  mutate(sub_feature = c(unique(sub_feature)[1], rep(NA, length(sub_feature) - 1))) %>%
+  group_by(feature_clean, model, exclusion) %>%
+  mutate(pseudo_ranking = dense_rank(ranking)) %>%
+  ungroup
+
+feature_importance_df %>%
+  subset(model == "xgb") %>% 
+  group_by(feature_clean) %>%
+  mutate(mr = min(ranking)) %>%
+  ungroup %>%
+  mutate(feature_clean = reorder(feature_clean, - mr)) %>% 
+  mutate(vjust = ifelse(pseudo_ranking %% 2 == 0,
+                        -0.5, 1.8)) %>%
+  ggplot(aes(x = ranking, y = feature_clean, 
+             label = sub_feature, shape = class,
+             colour = ifelse(direction == -1, "Negative", "Positive"))) +
+  geom_point() +
+  geom_text(aes(x = ranking + 0.05, vjust = vjust), colour = "black", size = 2, hjust = 0) +
+  theme_minimal(base_size = 8, base_family="Helvetica") +
+  theme(legend.key.size = unit(0, "line"), 
+        legend.position = "bottom") + 
+  scale_x_continuous(breaks = 1:10, expand = c(0.05, 0.05, 0.15, 0.15)) +
+  scale_shape(name = NULL) + 
+  xlab("Ranking") + 
+  ylab("Feature name") + 
+  scale_colour_manual(values = c("red4", "skyblue"),
+                      name = "Effect direction")
+```
+
+```{r}
+feature_importance_df <- feature_importances %>%
+  subset(exclusion == "percent_phase_field_of_view:sar:series_description") %>% 
+  mutate(feature_clean = ifelse(model == "xgb" & feature != "number_of_images",
+                                str_match(feature, "[a-zA-Z0-9_]+(?=:)"),
+                                feature),
+         sub_feature = ifelse(model == "xgb" & feature != "number_of_images",
+                              str_match(feature, "(?<=:)[a-zA-Z0-9_]+"),
+                              "")) %>%
+  mutate(feature_clean = feature_clean %>% 
+           str_replace_all("_", " ") %>% 
+           str_to_sentence) %>% 
+  mutate(feature_clean = case_match(feature_clean, 
+                                    "Sar" ~ "SAR", 
+                                    "Mr acquisition type" ~ "MR acquisition type",
+                                    "Percent phase field of view" ~ "%FOV",
+                                    .default = feature_clean)) %>% 
+  mutate(sub_feature = ifelse(sub_feature %in% c("sum", "length", "min", "max", "mean"),
+                              sprintf("+%s", sub_feature),
+                              sub_feature)) %>% 
+  mutate(class = factor(class, c("T2W", "DWI", "ADC", "DCE", "Others"))) %>% 
+  subset(abs(value) > 0.0 & fraction == 100) %>%
+  group_by(exclusion, feature_clean, model, class) %>%
+  mutate(value = value[which.max(abs(value))]) %>%
+  group_by(exclusion, model, class, fold) %>%
+  mutate(ranking = order(abs(value), decreasing = T)) %>%
+  group_by(exclusion, feature_clean, model, class) %>%
+  summarise(ranking = min(ranking),
+            direction = sign(value[which.max(abs(value))]),
+            sub_feature = sub_feature[which.max(abs(value))],
+            value = max(abs(value)),
+            feature = feature[1],
+            .groups = "drop") %>%
+  group_by(model, exclusion, class) %>%
+  filter(ranking <= 10) %>%
+  group_by(model, exclusion, ranking, feature_clean) %>%
+  mutate(sub_feature = ifelse(model == "xgb",
+                              paste(sprintf("%s (%s)", sub_feature, class) ,collapse = "; "),
+                              sub_feature)) %>%
+  mutate(exclusion = factor(exclusion, 
+                            names(exclusion_conversion), 
+                            exclusion_conversion)) %>%
+  group_by(feature_clean, model, exclusion, ranking) %>%
+  arrange(sub_feature) %>%
+  mutate(sub_feature = c(unique(sub_feature)[1], rep(NA, length(sub_feature) - 1))) %>%
+  group_by(feature_clean, model, exclusion) %>%
+  mutate(pseudo_ranking = dense_rank(ranking)) %>%
+  ungroup
+
+feature_importance_df %>%
+  subset(model == "xgb") %>% 
+  group_by(feature_clean) %>%
+  mutate(mr = min(ranking)) %>%
+  ungroup %>%
+  mutate(feature_clean = reorder(feature_clean, - mr)) %>% 
+  mutate(vjust = ifelse(pseudo_ranking %% 2 == 0,
+                        -0.5, 1.8)) %>%
+  ggplot(aes(x = ranking, y = feature_clean, 
+             label = sub_feature, shape = class,
+             colour = ifelse(direction == -1, "Negative", "Positive"))) +
+  geom_point() +
+  geom_text(aes(x = ranking + 0.05, vjust = vjust), colour = "black", size = 2, hjust = 0) +
+  theme_minimal(base_size = 8, base_family="Helvetica") +
+  theme(legend.key.size = unit(0, "line"), 
+        legend.position = "bottom") + 
+  scale_x_continuous(breaks = 1:10, expand = c(0.05, 0.05, 0.15, 0.15)) +
+  scale_shape(name = NULL) + 
+  xlab("Ranking") + 
+  ylab("Feature name") + 
+  scale_colour_manual(values = c("red4", "skyblue"),
+                      name = "Effect direction")
+```
+
+# Panels
+
+```{r}
+#| fig.height: 7.5
+#| fig.width: 6.5
+
+panel_cv_results <- cv_results %>%
+  filter(fraction == 100,
+         metric %in% c("precision", "recall", "f1-score"),
+         set %in% c("t2", "dwi", "adc", "dce", "others")) %>%
+  mutate(exclusion = factor(exclusion,
+                            rev(names(exclusion_conversion)), 
+                            rev(exclusion_conversion)),
+         set = factor(set, 
+                      names(series_conversion), 
+                      series_conversion),
+         metric = factor(metric, 
+                         names(metric_conversion), 
+                         metric_conversion)) %>%
+  ggplot(aes(x = value, y = exclusion, colour = model, shape = set)) +
+  stat_summary(geom = "point",
+               fun.data = mean_se,
+               position = position_dodge(width = 0.7), size = 1.0) +
+  theme_classic(base_size = 8, base_family="Helvetica") + 
+  theme(strip.text.y = element_text(angle = 0, hjust = 0, vjust = 0.5),
+        strip.background = element_blank(),
+        legend.position = "bottom",
+        panel.spacing.x = unit(1, "line"),
+        legend.key.size = unit(0, "line"),
+        panel.background = element_blank()) +
+  facet_grid(. ~ metric, scales = "free_x") + 
+  scale_x_continuous(limits = c(NA, 1)) +
+  scale_colour_brewer(palette = "Set1",
+                      name = "Model") + 
+  xlab("Value") +
+  ylab("Feature set") +
+  scale_shape_manual(values = c(1, 2, 3, 4, 5), name = "Seq. type") + 
+  guides(shape = guide_legend(ncol = 3),
+         colour = guide_legend(ncol = 1))
+
+panel_test_results <- test_results %>%
+  filter(fraction == 100,
+         metric %in% c("precision", "recall", "f1-score"),
+         set %in% c("t2", "dwi", "adc", "dce", "others")) %>%
+  mutate(exclusion = factor(exclusion,
+                            rev(names(exclusion_conversion)), 
+                            rev(exclusion_conversion)),
+         set = factor(set, 
+                      names(series_conversion), 
+                      series_conversion),
+         metric = factor(metric, 
+                         names(metric_conversion), 
+                         metric_conversion)) %>%
+  ggplot(aes(x = value, y = exclusion, colour = model, shape = set)) +
+  stat_summary(geom = "point",
+               fun.data = mean_se,
+               position = position_dodge(width = 0.7), size = 1.0) +
+  theme_classic(base_size = 8, base_family="Helvetica") + 
+  theme(strip.text.y = element_text(angle = 0, hjust = 0, vjust = 0.5),
+        strip.background = element_blank(),
+        legend.position = "bottom",
+        panel.spacing.x = unit(1, "line"),
+        legend.key.size = unit(0, "line"),
+        panel.background = element_blank()) +
+  facet_grid(. ~ metric, scales = "free_x") + 
+  scale_x_continuous(limits = c(NA, 1)) +
+  scale_colour_brewer(palette = "Set1",
+                      name = "Model") + 
+  xlab("Value") +
+  ylab("Feature set") +
+  scale_shape_manual(values = c(1, 2, 3, 4, 5), name = "Seq. type") + 
+  guides(shape = guide_legend(ncol = 3),
+         colour = guide_legend(ncol = 1))
+
+((panel_cv_results + theme(legend.position = "none")) /
+   (panel_test_results + theme(strip.text = element_blank())) /
+   (all_figures$test_cm + theme(legend.margin = margin(-3),
+                              legend.position = "right",
+                              legend.key.width = unit(0.5, "line")))) +
+  plot_annotation(tag_levels = "A") + 
+  plot_layout(heights = c(0.6, 0.6, 1.0))
+
+save_figure("figure_1")
+```
+
+```{r}
+#| fig.height: 7.5
+#| fig.width: 6.5
+
+all_figures$learning_curves_test
+
+save_figure("figure_2")
+```
+
+```{r}
+#| fig.height: 7.5
+#| fig.width: 6
+
+(all_figures$cv_logo_weighted /
+  all_figures$cv_logo_cm) +
+  plot_annotation(tag_levels = "A")
+
+save_figure("figure_3")
+```
+
+```{r}
+fmt_str <- 
+"#figure(
+  kind: table,
+    %s(
+      columns: %d,
+      align: %s,
+      %s,
+      %s,
+      %s,
+      %s),
+  caption: [%s]
+)"
+separator <- ",\n      "
+table_fns <- c("table", "tablex")
+
+to_typst_tablex <- function(df, 
+                            # string: function to create the table in typst
+                            table_fn = "tablex", 
+                            # string or vector: alignment
+                            align = "center + horizon", 
+                            # string: caption for table
+                            caption = "", 
+                            # named array: options for table/tablex
+                            table_options = c(),
+                            # int: size of text, only supported if table_fn == "tablex"
+                            text_size = 11) {
+  c_names <- paste(
+    sprintf("[%s]", colnames(df)), 
+    collapse = ", ")
+  tbl_str <- paste(
+    apply(df, 1, 
+          function(x) paste(sprintf("[%s]", x),
+                            collapse = ", ")),
+    collapse = separator)
+  if (length(align) > 1) align <- paste(align, collapse = " + ")
+  if (!(table_fn %in% table_fns)) stop(
+    sprintf("table_fn should in %s", table_fns))
+  if (!is.numeric(text_size)) stop(
+    sprintf("Text size should be a number but is %d", text_size))
+  if (length(table_options) > 0) {
+    x <- names(table_options)
+    y <- table_options
+    if (is.null(x)) {
+      stop("table_options should be a vector or list WITH NAMES")
+    }
+    table_options <- paste(paste(x, y, sep = ": "), collapse = separator)
+  } else {
+    table_options <- ""
+  }
+  
+  if (table_fn == "tablex") {
+    cell_mapping <- sprintf(
+      "map-cells: cell => {cell.content = text(cell.content, size: %dpt); cell}",
+      text_size)
+  } else {
+    cell_mapping <- ""
+  }
+  
+  return(
+    sprintf(fmt = fmt_str, 
+            table_fn,
+            length(colnames(df)), 
+            align,
+            c_names, 
+            tbl_str, 
+            table_options,
+            cell_mapping,
+            caption))
+}
+
+all_results %>% 
+  filter(split %in% c("cv", "test"), 
+         fraction == 100, 
+         metric %in% c("f1-score", "precision", "recall"), 
+         !grepl("avg", set)) %>%
+  group_by(model, exclusion, metric, true, pred, set, split) %>% 
+  summarise(S = sd(value, na.rm = T), M = mean(value, na.rm = T), .groups = "drop") %>% 
+  mutate(value = ifelse(is.na(S), sprintf("$%.1f%%$", M*100), sprintf("$%.1f%% (%.1f%%)$", M*100, S*100))) %>% 
+  dplyr::select(-S, -M) %>% 
+  pivot_wider(values_from = "value", names_from = c("set")) %>% 
+  dplyr::select(-true, -pred) %>% 
+  arrange(split, model, exclusion, metric) %>% 
+  mutate(model = c(catboost="CatBoost", xgb="XGBoost")[model], 
+         exclusion = exclusion_conversion[exclusion], 
+         metric = metric_conversion[metric],
+         split = c(cv = "CV", test = "Test")[split]) %>%
+  subset(metric == "F1-score") %>%
+  dplyr::select(exclusion, model, -metric, split, t2, dwi, adc, dce, others) %>%
+  to_typst_tablex(table_options = c(rp = "test", wr = "t"), table_fn = "tablex") %>%
+  cat
+```
