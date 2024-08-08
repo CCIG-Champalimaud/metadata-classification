@@ -12,7 +12,7 @@ Sometimes, large collections of mpMRI studies have no annotations regarding the 
 
 ## Conda environments
 
-Conda environments are provided for both training and inference (`environment-docker.yaml` and `environment-docker-prediction-catboost.yaml`, respectively). 
+Conda environments are provided for both training and inference (`environment-docker.yaml` and `environment-docker-prediction-catboost.yaml`, respectively). We use micromamba as it is typically faster but whichever one the enduser prefers is fine.
 
 ## Code details
 
@@ -20,16 +20,19 @@ The Python code presented here concerns, loosely, feature extraction, model trai
 
 ### Feature extraction
 
-The extraction of metadata values from each DICOM series (`src/msc/dicom_feature_extraction.py`), which can be run as a command line utility - `python -m src.msc.dicom_feature_extraction path/to/dicom/series` - producing a JSON formatted dictionary where each value corresponds to the space-concatenated list of unique DICOM values for each tag.
+*In `src/msc/dicom_feature_extraction.py`*
+
+The extraction of metadata values from each DICOM series, which can be run as a command line utility - `python -m src.msc.dicom_feature_extraction path/to/dicom/series` - producing a JSON formatted dictionary where each value corresponds to the space-concatenated list of unique DICOM values for each tag.
 
 ### Model training
 
-In `src/msc/__main__.py`
+*In `src/msc/__main__.py`*
 
 This is also a CLI (`python -m src.msc`) whose details are available with the `--help` flag. **Training requires as input a CSV file with all the tags produced by `src/msc/dicom_feature_extraction.py`.** Inspection of this code will reveal that there are several different possible models. A more practical example of training is available in the snakemake pipeline `train_all_models.smk`.
 
 ### Inference
-In `src/msc/utils/predict.py`
+
+*In `src/msc/utils/predict.py`*
 
 This is what end users should focus on using - we have made it as simple as possible to use this, so it shouldn't take more than running the following code:
 
