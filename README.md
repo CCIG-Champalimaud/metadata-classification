@@ -1,4 +1,4 @@
-# DICOM-MSC mpMRI sequence classification from DICOM metadata
+# DICOM metadata series classification (MSC) mpMRI sequence classification from DICOM metadata
 
 ## Context
 
