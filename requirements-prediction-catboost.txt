@@ -5,3 +5,5 @@ pandas>=1.5.0
 polars==0.16.4
 pydicom>=2.3.0
 scipy>=1.9.2
+pyarrow
+tqdm

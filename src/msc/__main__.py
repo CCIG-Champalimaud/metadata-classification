@@ -94,9 +94,7 @@ if __name__ == "__main__":
     model_name = args.model_name
 
     if args.exclude_cols is not None:
-        text_sep_cols = [
-            x for x in text_sep_cols if x not in args.exclude_cols
-        ]
+        text_sep_cols = [x for x in text_sep_cols if x not in args.exclude_cols]
         num_sep_cols = [x for x in num_sep_cols if x not in args.exclude_cols]
         num_cols = [x for x in num_cols if x not in args.exclude_cols]
         all_cols = text_sep_cols + num_sep_cols + num_cols
@@ -312,9 +310,7 @@ if __name__ == "__main__":
             test_data_pred = Pool(
                 data=FeaturesData(
                     cat_feature_data=np.array(X_ho[fc]),
-                    num_feature_data=np.array(
-                        X_ho[num_cols], dtype=np.float32
-                    ),
+                    num_feature_data=np.array(X_ho[num_cols], dtype=np.float32),
                     num_feature_names=num_cols,
                     cat_feature_names=fc,
                 ),

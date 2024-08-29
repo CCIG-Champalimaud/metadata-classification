@@ -7,3 +7,5 @@ pydicom>=2.3.0
 scikit_learn>=1.1.2
 scipy>=1.9.2
 xgboost>=1.6.2
+pyarrow
+tqdm

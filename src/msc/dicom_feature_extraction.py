@@ -2,7 +2,7 @@ import os
 import re
 import pydicom
 from glob import glob
-from pydicom.filereader import read_file
+from pydicom.filereader import dcmread
 
 seg_sop = "1.2.840.10008.5.1.4.1.1.66.4"
 
@@ -98,7 +98,7 @@ def extract_features_from_dicom(path, join=True, return_paths=False):
     n_images = len(file_paths)
     output_dict = {"number_of_images": n_images}
     for file in file_paths:
-        dicom_file = read_file(file)
+        dicom_file = dcmread(file, stop_before_pixels=True)
 
         for k in dicom_header_dict:
             dicom_key = dicom_header_dict[k]
