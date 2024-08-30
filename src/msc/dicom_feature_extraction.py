@@ -115,6 +115,18 @@ def extract_features_from_dicom(path, join=True, return_paths=False):
                     v = re.sub("[0-9]+/[0-9]+/[0-9]+", "", v)
                     v = re.sub("[0-9]+-[0-9]+-[0-9]+", "", v)
                     v = re.sub("[0-9]+:[0-9]+:[0-9]+", "", v)
+                elif k == "diffusion_bvalue":
+                    if isinstance(v, bytes):
+                        v = int.from_bytes(v, byteorder="big")
+                        if v > 5000:
+                            v = dicom_file[dicom_key].value[0]
+                elif k == "diffusion_bvalue_ge":
+                    if isinstance(v, bytes):
+                        v = v.decode().split("\\")[0]
+                    elif isinstance(v, pydicom.multival.MultiValue):
+                        v = v[0]
+                    if len(str(v)) > 5:
+                        v = str(v)[-4:].lstrip("0")
             else:
                 v = "-"
             if isinstance(v, pydicom.multival.MultiValue):
@@ -144,7 +156,7 @@ def extract_all_metadata_from_dicom(path, skip_seg=True):
     is_seg = False
     is_valid = True
     for file in file_paths:
-        dicom_file = read_file(file)
+        dicom_file = dcmread(file, stop_before_pixels=True)
         # skips file if basic tag not present
         if (0x0008, 0x0016) not in dicom_file:
             is_valid = False
