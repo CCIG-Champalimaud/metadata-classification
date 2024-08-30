@@ -98,7 +98,10 @@ def extract_features_from_dicom(path, join=True, return_paths=False):
     n_images = len(file_paths)
     output_dict = {"number_of_images": n_images}
     for file in file_paths:
-        dicom_file = dcmread(file, stop_before_pixels=True)
+        try:
+            dicom_file = dcmread(file, stop_before_pixels=True)
+        except:
+            continue
 
         for k in dicom_header_dict:
             dicom_key = dicom_header_dict[k]
