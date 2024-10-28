@@ -12,13 +12,31 @@ import sys
 sys.path.append(".")
 
 
-def mode(array: np.ndarray):
+def mode(array: np.ndarray) -> np.ndarray:
+    """
+    Calculates the mode of an array.
+
+    Args:
+        array (np.ndarray): input array.
+
+    Returns:
+        np.ndarray: mode of the array.
+    """
     u, c = np.unique(array, return_counts=True)
     idx = np.argmax(c)
     return u[idx]
 
 
-def mode_array(array: np.ndarray):
+def mode_array(array: np.ndarray) -> np.ndarray:
+    """
+    Calculates the mode of an array of the first dimension.
+
+    Args:
+        array (np.ndarray): input array.
+
+    Returns:
+        np.ndarray: mode of the array.
+    """
     output = np.zeros(array.shape[1], dtype=object)
     for i in range(array.shape[1]):
         output[i] = mode(array[:, i])
@@ -68,6 +86,12 @@ if __name__ == "__main__":
             if X in all_models[model_k]:
                 for fold in all_models[model_k][X]:
                     fold_idx = fold["fold"]
+                    place_holder_dict = {
+                        "exclusion": exclusion_str,
+                        "fold": fold_idx,
+                        "split": X,
+                        "fraction": fraction,
+                    }
                     if X == "test":
                         test_y = fold["y_true"]
                         all_test_pred.append(fold["y_pred"])
@@ -77,16 +101,17 @@ if __name__ == "__main__":
                             ].append(fold["y_pred"])
                             all_test_y[exclusion_str] = fold["y_true"]
                     # add auc
-                    metric_dict["model"].append(model_name)
-                    metric_dict["exclusion"].append(exclusion_str)
-                    metric_dict["metric"].append("auc")
-                    metric_dict["value"].append(fold["auc"])
-                    metric_dict["true"].append(np.nan)
-                    metric_dict["pred"].append(np.nan)
-                    metric_dict["set"].append("full")
-                    metric_dict["split"].append(X)
-                    metric_dict["fold"].append(fold_idx)
-                    metric_dict["fraction"].append(fraction)
+                    dict_update = dict(
+                        model=model_name,
+                        metric="auc",
+                        value=fold["auc"],
+                        true=np.nan,
+                        pred=np.nan,
+                        set="full",
+                        **place_holder_dict,
+                    )
+                    for k in dict_update:
+                        metric_dict[k].append(dict_update[k])
                     # add confusion matrix in long format
                     cm = confusion_matrix(
                         fold["y_true"], fold["y_pred"], labels=keys_real
@@ -95,16 +120,17 @@ if __name__ == "__main__":
                     cm_r = cm.ravel()
                     for k1 in keys:
                         for k2 in keys:
-                            metric_dict["model"].append(model_name)
-                            metric_dict["exclusion"].append(exclusion_str)
-                            metric_dict["metric"].append("cm")
-                            metric_dict["value"].append(cm_r[i])
-                            metric_dict["true"].append(k1)
-                            metric_dict["pred"].append(k2)
-                            metric_dict["set"].append("{}_{}".format(k1, k2))
-                            metric_dict["split"].append(X)
-                            metric_dict["fold"].append(fold_idx)
-                            metric_dict["fraction"].append(fraction)
+                            dict_update = dict(
+                                model=model_name,
+                                metric="cm",
+                                value=cm_r[i],
+                                true=k1,
+                                pred=k2,
+                                set="{}_{}".format(k1, k2),
+                                **place_holder_dict,
+                            )
+                            for k in dict_update:
+                                metric_dict[k].append(dict_update[k])
                             i += 1
                     # add metrics
                     cr = classification_report(
@@ -116,16 +142,17 @@ if __name__ == "__main__":
                     for k in cr:
                         if isinstance(cr[k], dict):
                             for kk in cr[k]:
-                                metric_dict["model"].append(model_name)
-                                metric_dict["exclusion"].append(exclusion_str)
-                                metric_dict["metric"].append(kk)
-                                metric_dict["value"].append(cr[k][kk])
-                                metric_dict["true"].append(np.nan)
-                                metric_dict["pred"].append(np.nan)
-                                metric_dict["set"].append(k)
-                                metric_dict["split"].append(X)
-                                metric_dict["fold"].append(fold_idx)
-                                metric_dict["fraction"].append(fraction)
+                                dict_update = dict(
+                                    model=model_name,
+                                    metric=kk,
+                                    value=cr[k][kk],
+                                    true=np.nan,
+                                    pred=np.nan,
+                                    set=k,
+                                    **place_holder_dict,
+                                )
+                                for k in dict_update:
+                                    metric_dict[k].append(dict_update[k])
         if test_y is not None:
             all_test_pred = np.array(all_test_pred)
             all_test_pred = mode_array(all_test_pred)
@@ -134,18 +161,25 @@ if __name__ == "__main__":
             cm = confusion_matrix(test_y, all_test_pred, labels=keys_real)
             i = 0
             cm_r = cm.ravel()
+            place_holder_dict = {
+                "exclusion": exclusion_str,
+                "fold": "all",
+                "split": "test_consensus",
+                "fraction": fraction,
+            }
             for k1 in keys:
                 for k2 in keys:
-                    metric_dict["model"].append(model_name)
-                    metric_dict["exclusion"].append(exclusion_str)
-                    metric_dict["metric"].append("cm")
-                    metric_dict["value"].append(cm_r[i])
-                    metric_dict["true"].append(k1)
-                    metric_dict["pred"].append(k2)
-                    metric_dict["set"].append("{}_{}".format(k1, k2))
-                    metric_dict["split"].append("test_consensus")
-                    metric_dict["fold"].append("all")
-                    metric_dict["fraction"].append(fraction)
+                    dict_update = dict(
+                        model=model_name,
+                        metric="cm",
+                        value=cm_r[i],
+                        true=k1,
+                        pred=k2,
+                        set="{}_{}".format(k1, k2),
+                        **place_holder_dict,
+                    )
+                    for k in dict_update:
+                        metric_dict[k].append(dict_update[k])
                     i += 1
             # add metrics
             cr = classification_report(
@@ -154,20 +188,27 @@ if __name__ == "__main__":
             for k in cr:
                 if isinstance(cr[k], dict):
                     for kk in cr[k]:
-                        metric_dict["model"].append(model_name)
-                        metric_dict["exclusion"].append(exclusion_str)
-                        metric_dict["metric"].append(kk)
-                        metric_dict["value"].append(cr[k][kk])
-                        metric_dict["true"].append(np.nan)
-                        metric_dict["pred"].append(np.nan)
-                        metric_dict["set"].append(k)
-                        metric_dict["split"].append("test_consensus")
-                        metric_dict["fold"].append("all")
-                        metric_dict["fraction"].append(fraction)
+                        dict_update = dict(
+                            model=model_name,
+                            metric=kk,
+                            value=cr[k][kk],
+                            true=np.nan,
+                            pred=np.nan,
+                            set=k,
+                            **place_holder_dict,
+                        )
+                        for k in dict_update:
+                            metric_dict[k].append(dict_update[k])
 
     if len(all_test_pred_models) > 0:
         for exclusion_str in all_test_pred_models:
             for fraction in all_test_pred_models[exclusion_str]:
+                place_holder_dict = {
+                    "exclusion": exclusion_str,
+                    "fold": "all",
+                    "split": "test_ensemble",
+                    "fraction": fraction,
+                }
                 all_arrays = [
                     np.array(x).flatten()
                     for x in all_test_pred_models[exclusion_str][fraction]
@@ -184,16 +225,17 @@ if __name__ == "__main__":
                 cm_r = cm.ravel()
                 for k1 in keys:
                     for k2 in keys:
-                        metric_dict["model"].append("all")
-                        metric_dict["exclusion"].append(exclusion_str)
-                        metric_dict["metric"].append("cm")
-                        metric_dict["value"].append(cm_r[i])
-                        metric_dict["true"].append(k1)
-                        metric_dict["pred"].append(k2)
-                        metric_dict["set"].append("{}_{}".format(k1, k2))
-                        metric_dict["split"].append("test_ensemble")
-                        metric_dict["fold"].append("all")
-                        metric_dict["fraction"].append(fraction)
+                        dict_update = dict(
+                            model="all",
+                            metric="cm",
+                            value=cm_r[i],
+                            true=k1,
+                            pred=k2,
+                            set="{}_{}".format(k1, k2),
+                            **place_holder_dict,
+                        )
+                        for k in dict_update:
+                            metric_dict[k].append(dict_update[k])
                         i += 1
                 # add metrics
                 cr = classification_report(
@@ -205,15 +247,16 @@ if __name__ == "__main__":
                 for k in cr:
                     if isinstance(cr[k], dict):
                         for kk in cr[k]:
-                            metric_dict["model"].append("all")
-                            metric_dict["exclusion"].append(exclusion_str)
-                            metric_dict["metric"].append(kk)
-                            metric_dict["value"].append(cr[k][kk])
-                            metric_dict["true"].append(np.nan)
-                            metric_dict["pred"].append(np.nan)
-                            metric_dict["set"].append(k)
-                            metric_dict["split"].append("test_ensemble")
-                            metric_dict["fold"].append("all")
-                            metric_dict["fraction"].append(fraction)
+                            dict_update = dict(
+                                model="all",
+                                metric=kk,
+                                value=cr[k][kk],
+                                true=np.nan,
+                                pred=np.nan,
+                                set=k,
+                                **place_holder_dict,
+                            )
+                            for k in dict_update:
+                                metric_dict[k].append(dict_update[k])
 
     pl.DataFrame(metric_dict).write_csv(args.output_path)
