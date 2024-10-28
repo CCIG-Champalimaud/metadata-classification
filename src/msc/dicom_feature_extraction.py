@@ -2,6 +2,7 @@ import os
 import re
 import pydicom
 import numpy as np
+from typing import Any
 from pathlib import Path
 from glob import glob
 from pydicom.filereader import dcmread
@@ -102,10 +103,142 @@ pcai_mapping = {
     "0008,103e": "series_description",
 }
 
+converted_dicom_header_dict = {
+    k: (eval("0x{}".format(v[0])), eval("0x{}".format(v[1])))
+    for k, v in dicom_header_dict.items()
+}
+
+
+def process_bvalue(v: bytes | float | int, dicom_file: Dataset) -> float | int:
+    """
+    Process b-value from DICOM header.
+
+    Args:
+        v (bytes | float | int): b-value.
+        dicom_file (Dataset): DICOM file.
+
+    Returns:
+        float | int: processed b-value.
+    """
+    if isinstance(v, bytes):
+        v = int.from_bytes(v, byteorder="big")
+        if v > 5000:
+            v = dicom_file[dicom_header_dict["diffusion_bvalue"]].value[0]
+    return v
+
+
+def process_bvalue_ge(
+    v: bytes | float | int, dicom_file: None = None
+) -> float | int:
+    """
+    Process GE scanner b-value from DICOM header.
+
+    Args:
+        v (bytes | float | int): b-value.
+        dicom_file (None): only for compatibility purposes.
+
+    Returns:
+        float | int: processed b-value.
+    """
+    if isinstance(v, bytes):
+        v = v.decode().split("\\")[0]
+    elif isinstance(v, pydicom.multival.MultiValue):
+        v = v[0]
+    if len(str(v)) > 5:
+        v = str(v)[-4:].lstrip("0")
+    return v
+
+
+def process_series_description(v: str, dicom_file: None = None) -> str:
+    """
+    Process series description from DICOM header.
+
+    Args:
+        v (str): series description.
+        dicom_file (None): only for compatibility purposes.
+
+    Returns:
+        str: processed series description.
+    """
+    # replace times with empty space...
+    v = re.sub("[0-9]+/[0-9]+/[0-9]+", "", v)
+    v = re.sub("[0-9]+-[0-9]+-[0-9]+", "", v)
+    v = re.sub("[0-9]+:[0-9]+:[0-9]+", "", v)
+    return v
+
+
+def process_multivalues(v: Any) -> str | int | float:
+    """
+    Process multi-valued DICOM header.
+
+    Args:
+        v (Any): possibly multi-valued DICOM header.
+
+    Returns:
+        (str | int | float): processed multi-valued DICOM header.
+    """
+    if isinstance(v, pydicom.multival.MultiValue):
+        v = " ".join([str(x) for x in v])
+    if isinstance(v, list):
+        v = " ".join([str(x) for x in v])
+    v = str(v)
+    return v
+
+
+value_processors = {
+    "diffusion_bvalue": process_bvalue,
+    "diffusion_bvalue_ge": process_bvalue_ge,
+    "series_description": process_series_description,
+}
+
+
+def extract_metadata_from_file(dicom_file: Dataset) -> dict:
+    """
+    Extract metadata from DICOM file.
+
+    Args:
+        dicom_file (Dataset): opened dicom file.
+
+    Returns:
+        dict: extracted metadata (available in ``dicom_header_dict``).
+    """
+    output_dict = {}
+    if (0x0008, 0x0016) not in dicom_file:
+        dicom_file["valid"] = False
+    # skips file if SOP class is segmentation
+    if dicom_file[0x0008, 0x0016].value == seg_sop:
+        dicom_file["seg"] = True
+    for k in dicom_header_dict:
+        dicom_key = converted_dicom_header_dict[k]
+        if dicom_key in dicom_file:
+            v = dicom_file[dicom_key].value
+            if k in value_processors:
+                v = value_processors[k](v, dicom_file)
+        else:
+            v = "-"
+        v = process_multivalues(v)
+        output_dict[k] = v
+
+    return output_dict
+
 
 def extract_features_from_dicom(
     path: str, join: bool = True, return_paths: bool = False
 ) -> dict[str, list | str | float | int]:
+    """
+    Extract features (specified in ``dicom_header_dict``) from DICOM files in a
+    given folder.
+
+    Args:
+        path (str): path to folder containing DICOM files.
+        join (bool, optional): whether the unique outputs should be joined using
+            ``'|'`` after feature extraction. Defaults to True.
+        return_paths (bool, optional): whether paths should be returned.
+            Defaults to False.
+
+    Returns:
+        dict[str, list | str | float | int]: a dictionary with features.
+    """
     file_paths = glob(os.path.join(path, "*dcm"))
     n_images = len(file_paths)
     output_dict = {"number_of_images": n_images}
@@ -115,42 +248,15 @@ def extract_features_from_dicom(
         except:
             continue
 
-        for k in dicom_header_dict:
-            dicom_key = dicom_header_dict[k]
-            dicom_key = (
-                eval("0x{}".format(dicom_key[0])),
-                eval("0x{}".format(dicom_key[1])),
-            )
+        features = extract_metadata_from_file(dicom_file)
+        if features is None:
+            continue
+
+        for k in features:
             if k not in output_dict:
                 output_dict[k] = []
-            if dicom_key in dicom_file:
-                v = dicom_file[dicom_key].value
-                # replace times with empty space...
-                if k == "series_description":
-                    v = re.sub("[0-9]+/[0-9]+/[0-9]+", "", v)
-                    v = re.sub("[0-9]+-[0-9]+-[0-9]+", "", v)
-                    v = re.sub("[0-9]+:[0-9]+:[0-9]+", "", v)
-                elif k == "diffusion_bvalue":
-                    if isinstance(v, bytes):
-                        v = int.from_bytes(v, byteorder="big")
-                        if v > 5000:
-                            v = dicom_file[dicom_key].value[0]
-                elif k == "diffusion_bvalue_ge":
-                    if isinstance(v, bytes):
-                        v = v.decode().split("\\")[0]
-                    elif isinstance(v, pydicom.multival.MultiValue):
-                        v = v[0]
-                    if len(str(v)) > 5:
-                        v = str(v)[-4:].lstrip("0")
-            else:
-                v = "-"
-            if isinstance(v, pydicom.multival.MultiValue):
-                v = " ".join([str(x) for x in v])
-            if isinstance(v, list):
-                v = " ".join([str(x) for x in v])
-            v = str(v)
-            if v not in output_dict[k]:
-                output_dict[k].append(v)
+            if features[k] not in output_dict[k]:
+                output_dict[k].append(features[k])
 
     if join == True:
         for k in output_dict:
@@ -161,104 +267,8 @@ def extract_features_from_dicom(
         output_dict["file_paths"] = file_paths
         output_dict["path"] = path
 
-    return output_dict
-
-
-def extract_metadata_from_file(dicom_file: Dataset):
-    if (0x0008, 0x0016) not in dicom_file:
-        return None
-    # skips file if SOP class is segmentation
-    if dicom_file[0x0008, 0x0016].value == seg_sop:
-        return None
-    output_dict = {}
-    for k in dicom_header_dict:
-        dicom_key = dicom_header_dict[k]
-        dicom_key = (
-            eval("0x{}".format(dicom_key[0])),
-            eval("0x{}".format(dicom_key[1])),
-        )
-        if dicom_key in dicom_file:
-            v = dicom_file[dicom_key].value
-            if k == "diffusion_bvalue_ge":
-                v = eval(str(v))
-                if isinstance(v, list) == False:
-                    v = v.decode()
-                    v = v.split("\\")
-                    v = str(v[0])
-                else:
-                    v = str(v[0])
-                if len(v) > 5:
-                    v = v[-4:]
-            # replace times with empty space...
-            if k == "series_description":
-                v = re.sub("[0-9]+/[0-9]+/[0-9]+", "", v)
-                v = re.sub("[0-9]+-[0-9]+-[0-9]+", "", v)
-                v = re.sub("[0-9]+:[0-9]+:[0-9]+", "", v)
-        else:
-            v = "-"
-        if isinstance(v, pydicom.multival.MultiValue):
-            v = " ".join([str(x) for x in v])
-        if isinstance(v, list):
-            v = " ".join([str(x) for x in v])
-        v = str(v)
-        output_dict[k] = v
-    return output_dict
-
-
-def extract_all_metadata_from_dicom(path, skip_seg=True):
-    file_paths = glob(os.path.join(path, "*dcm"))
-    n_images = len(file_paths)
-    output_dict = {"number_of_images": n_images}
-    is_seg = False
-    is_valid = True
-    for file in file_paths:
-        dicom_file = dcmread(file, stop_before_pixels=True)
-        # skips file if basic tag not present
-        if (0x0008, 0x0016) not in dicom_file:
-            is_valid = False
-            continue
-        # skips file if SOP class is segmentation
-        if dicom_file[0x0008, 0x0016].value == seg_sop:
-            is_seg = True
-            continue
-        for k in dicom_header_dict:
-            dicom_key = dicom_header_dict[k]
-            dicom_key = (
-                eval("0x{}".format(dicom_key[0])),
-                eval("0x{}".format(dicom_key[1])),
-            )
-            if k not in output_dict:
-                output_dict[k] = []
-            if dicom_key in dicom_file:
-                v = dicom_file[dicom_key].value
-                if k == "diffusion_bvalue_ge":
-                    v = eval(str(v))
-                    if isinstance(v, list) == False:
-                        v = v.decode()
-                        v = v.split("\\")
-                        v = str(v[0])
-                    else:
-                        v = str(v[0])
-                    if len(v) > 5:
-                        v = v[-4:]
-                # replace times with empty space...
-                if k == "series_description":
-                    v = re.sub("[0-9]+/[0-9]+/[0-9]+", "", v)
-                    v = re.sub("[0-9]+-[0-9]+-[0-9]+", "", v)
-                    v = re.sub("[0-9]+:[0-9]+:[0-9]+", "", v)
-            else:
-                v = "-"
-            if isinstance(v, pydicom.multival.MultiValue):
-                v = " ".join([str(x) for x in v])
-            if isinstance(v, list):
-                v = " ".join([str(x) for x in v])
-            v = str(v)
-            output_dict[k].append(v)
-
-    output_dict["file_paths"] = file_paths
-    output_dict["path"] = path
-    output_dict["seg"] = is_seg
-    output_dict["valid"] = is_valid
+    output_dict["seg"] = True in output_dict["seg"]
+    output_dict["valid"] = all(output_dict["valid"])
 
     return output_dict
 
@@ -301,11 +311,14 @@ def extract_pixel_features(pixel_array: Dataset) -> dict:
 
 def extract_pixel_features_series(path: str) -> dict[str, list]:
     """
-    Extracts pixel-wise features from a series of DICOM files.
+    Extracts image features from a series of DICOM files using
+    ``extract_pixel_features``.
+
     Args:
         path (str): path to DICOM directory.
+
     Returns:
-        dict: pixel-wise features.
+        dict: image features.
     """
     file_paths = glob(os.path.join(path, "*dcm"))
     features = []
@@ -323,7 +336,7 @@ def extract_pixel_features_series(path: str) -> dict[str, list]:
 
 
 def extract_all_features(
-    path: str, metadata_features: bool = True, pixel_features: bool = True
+    path: str, metadata_features: bool = True, image_features: bool = True
 ) -> dict:
     """
     Extracts all features from a DICOM file.
@@ -332,7 +345,7 @@ def extract_all_features(
         path (str): path to DICOM file.
         metadata_features (bool, optional): extract metadata features. Defaults
             to True.
-        pixel_features (bool, optional): extract pixel features. Defaults to
+        image_features (bool, optional): extract image features. Defaults to
             True.
 
     Returns:
@@ -354,7 +367,7 @@ def extract_all_features(
             features.update(extract_metadata_from_file(dicom_file))
         except:
             valid = False
-    if pixel_features is True:
+    if image_features is True:
         try:
             features.update(extract_pixel_features(dicom_file))
         except:

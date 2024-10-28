@@ -1,18 +1,45 @@
 import numpy as np
 import polars as pl
 from copy import deepcopy
+from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.feature_extraction.text import CountVectorizer
 
 
-class SpaceSepNumColsToMatrix:
-    def __init__(self, standard=False, default_value=-1):
+class SpaceSepNumColsToMatrix(BaseEstimator, TransformerMixin):
+    """
+    Converts a list of space-separated numbers into a matrix following a set
+    of properties. This is useful for feature extraction when there is some
+    structure to the input (i.e. each element is a set of numbers which can
+    be summarised using relatively simple features).
+    """
+
+    def __init__(self, standard=False, default_value=-1, split_char: str = " "):
+        """
+        Args:
+            standard (bool, optional): assumes that the same number of features
+                is always present. If False, extracts the length, sum, minimum
+                and maximum values from the space-separated array. Defaults to
+                False.
+            default_value (int, optional): default value for when standard is
+                False. Defaults to -1.
+            split_char (str, optional): character to split the space-separated
+                numbers. Defaults to " ".
+        """
         self.standard = standard
         self.default_value = default_value
+        self.split_char = split_char
 
-    def fit(self, X, y=None):
-        mat = [x.strip().split(" ") for x in X]
+    def fit(self, X: np.ndarray, y: None = None) -> BaseEstimator:
+        """
+        Fits the transformer.
+
+        Args:
+            X (np.ndarray): input data.
+            y (None, optional): not used. Defaults to None.
+        """
+        mat = [x.strip().split(self.split_char) for x in X]
         sizes, counts = np.unique([len(x) for x in mat], return_counts=True)
-        if self.standard == False:
+        if self.standard is False:
             self.transform_ = "sum_size"
             self.n_features_ = 5
             self.feature_names_ = ["length", "sum", "min", "max", "mean"]
@@ -20,17 +47,47 @@ class SpaceSepNumColsToMatrix:
             self.transform_ = "standard"
             self.n_features_ = sizes[0]
             self.feature_names_ = [i for i in range(self.n_features_)]
+        return self
 
-    def safe_feat(self, x):
+    def safe_feat(
+        self, x: list
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """
+
+        Args:
+            x (list): extracts the sum, minimum, maximum and mean of a list of
+                numbers. If an error is throwed, returns a tuple of the default
+                value for each of the four features.
+
+        Returns:
+            tuple: sum, minimum, maximum and mean of a list of numbers.
+        """
         try:
             x = [i for i in x if i != ""]
             x = np.float32(x)
             return x.sum(), x.min(), x.max(), x.mean()
         except:
-            return [self.default_value for _ in range(4)]
+            return tuple([self.default_value for _ in range(4)])
 
-    def transform(self, X, y=None):
-        mat = [x.strip().split(" ") for x in X]
+    def transform(self, X: np.ndarray, y: None = None) -> np.ndarray:
+        """
+        Transforms the input data containing space-separated columns into a
+        numerical matrix.
+
+        Args:
+            X (np.ndarray): input data with strings containing space-separated
+                columns.
+            y (None, optional): not used. Defaults to None.
+
+        Raises:
+            Exception: raises an error if ``standard`` is ``True`` and there are
+                a different number of elements in each row.
+
+        Returns:
+            np.ndarray: transformed data.
+        """
+
+        mat = [x.strip().split(self.split_char) for x in X]
         if self.transform_ == "standard":
             mat = np.array(mat).astype(np.float32)
             if mat.shape[1] != self.n_features_:
@@ -39,23 +96,52 @@ class SpaceSepNumColsToMatrix:
             mat = np.array([[len(x), *self.safe_feat(x)] for x in mat])
         return mat.astype(np.float32)
 
-    def fit_transform(self, X, y=None):
+    def fit_transform(self, X, y=None) -> np.ndarray:
         self.fit(X)
         return self.transform(X)
 
 
-class TextColsToCounts:
+class TextColsToCounts(BaseEstimator, TransformerMixin):
+    """
+    Convenience class that converts text columns into a numerical matrix for
+    regular machine-learning models. Columns in ``text_cols`` are converted
+    to a matrix of counts using the standard ``sklearn`` CountVectorizer, while
+    columns in ``text_num_cols`` are converted using
+    ``SpaceSepNumColsToMatrix``. Finally, ``num_cols`` are simply coerced to
+    numerical values.
+
+    ``text_cols``, ``text_num_cols`` and ``num_cols`` have to be provided as
+    dictionaries with the keys corresponding to array indices and the values to
+    column names. This is helpful for when the data is loaded from a polars
+    DataFrame.
+    """
+
     def __init__(
         self,
         text_cols: dict[str, str] = {},
         text_num_cols: dict[str, str] = {},
         num_cols: dict[str, str] = {},
     ):
+        """
+        Args:
+            text_cols (dict[str, str], optional): text columns. Defaults to {}.
+            text_num_cols (dict[str, str], optional): numerical text columns.
+                Defaults to {}.
+            num_cols (dict[str, str], optional): numerical columns. Defaults to
+                {}.
+        """
         self.text_cols = text_cols
         self.text_num_cols = text_num_cols
         self.num_cols = num_cols
 
-    def fit(self, X, y=None):
+    def fit(self, X: np.ndarray, y: None = None) -> BaseEstimator:
+        """
+        Fits the transformer.
+
+        Args:
+            X (np.ndarray): input data array.
+            y (None, optional): not used. Defaults to None.
+        """
         self.all_cols_ = sorted(
             [*self.num_cols, *self.text_cols, *self.text_num_cols]
         )
@@ -91,8 +177,22 @@ class TextColsToCounts:
         self.new_col_names_ = []
         for c in self.col_name_dict_:
             self.new_col_names_.extend(self.col_name_dict_[c])
+        return self
 
-    def transform(self, X, y=None):
+    def transform(
+        self, X: np.ndarray | pl.DataFrame, y: None = None
+    ) -> np.ndarray:
+        """
+        Transforms the input data containing text, text-numerical and numerical
+        columns into a numerical matrix.
+
+        Args:
+            X (np.ndarray): input data array.
+            y (None, optional): not used. Defaults to None.
+
+        Returns:
+            np.ndarray: transformed array.
+        """
         if isinstance(X, pl.DataFrame):
             all_cols = [
                 *[self.text_cols[k] for k in self.text_cols],
@@ -142,14 +242,40 @@ class TextColsToCounts:
         return self.transform(X)
 
 
-class RemoveNan:
+class RemoveNan(BaseEstimator, TransformerMixin):
+    """
+    Remove rows with more than 1 nan value. Not complicated.
+    """
+
     def __init__(self):
         pass
 
-    def fit(self, X, y):
+    def fit(self, X: None = None, y: None = None) -> BaseEstimator:
+        """
+        Does nothing.
+
+        Args:
+            X (None): not used. Defaults to None.
+            y (None): not used. Defaults to None.
+
+        Returns:
+            self
+        """
         return self
 
-    def transform(self, X, y):
+    def transform(
+        self, X: np.ndarray, y: np.ndarray
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """
+        Drops rows with more than 1 nan value.
+
+        Args:
+            X (np.ndarray): data array.
+            y (np.ndarray): target array.
+
+        Returns:
+            np.ndarray: ``X`` and ``y`` without rows with more than 1 nan value.
+        """
         X = deepcopy(X)
         idxs = np.isnan(X).sum(1) > 1
         X = X[~idxs]

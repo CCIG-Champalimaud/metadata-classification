@@ -7,8 +7,9 @@ import os
 from glob import glob
 from multiprocessing import Pool
 from scipy.stats import mode
-from tqdm import tqdm
 from catboost import FeaturesData
+from tqdm import tqdm
+from typing import Tuple, list
 from ..dicom_feature_extraction import (
     extract_features_from_dicom,
     dicom_header_dict,
@@ -16,12 +17,42 @@ from ..dicom_feature_extraction import (
 from ..feature_extraction import TextColsToCounts
 from ..constants import text_sep_cols, num_sep_cols, num_cols
 from ..sanitization import sanitize_data
-from typing import Tuple, List
 
 
 def read_data(
     input_paths: list[str], dicom_recursion: int = 0, n_workers: int = 0
 ) -> pl.DataFrame:
+    """
+    Reads data which can be in multiple formats. The supported data formats are:
+        - Folder containing DICOM (.dcm) files
+        - Folder containing DICOM dataset in a nested structure (requires
+            specifying the recursion depth, ``dicom_recursion``)
+        - CSV/TSV/parquet file containing features (one column per feature with
+            columns corresponding to study and series UID)
+        - JSON file with a format such that:
+        ```
+            patient_id
+            |-study_uid
+            | |-series_uid
+            | | |-file_path
+            | | | |-feature_1: value
+            | | | |-feature_2: value
+            ...
+        ```
+
+    Args:
+        input_paths (list[str]): list of input paths.
+        dicom_recursion (int, optional): number of directories to dive into when
+            looking for a large structured DICOM dataset. If specified assumes
+            that DICOM files are hidden in nested folders at the specified
+            recursion depth. Defaults to 0.
+        n_workers (int, optional): number of parallel workers when recursion is
+            specified. Defaults to 0.
+
+    Returns:
+        pl.DataFrame: DICOM feature dataframe.
+    """
+
     def read_data_dicom_dataset(input_path, dicom_recursion, n_workers):
         all_series_paths = glob(
             os.sep.join(
@@ -131,11 +162,26 @@ def read_data(
     return all_features
 
 
-def summarise_columns(x: pl.DataFrame) -> pl.DataFrame:
+def summarise_columns(
+    x: pl.DataFrame,
+    group_cols: list[str] = ["study_uid", "series_uid", "patient_id"],
+) -> pl.DataFrame:
+    """
+    Summarises all columns in a dataframe by the grouping columns (typically
+    "study_uid" and "series_uid").
+
+    Args:
+        x (pl.DataFrame): feature dataframe.
+        group_cols (list[str], optional): columns for output grouping. Defaults
+            to ["study_uid", "series_uid", "patient_id"].)
+
+    Returns:
+        pl.DataFrame: summarised column.
+    """
     cols = x.columns
-    group_cols = ["study_uid", "series_uid"]
-    if "patient_id" in x:
-        group_cols.append("patient_id")
+    group_cols = [x for x in group_cols if x in cols]
+    if len(group_cols) == 0:
+        raise ValueError("No column in group_cols was present in x")
     col_expressions = [
         (
             pl.col(k)
@@ -174,8 +220,9 @@ def summarise_columns(x: pl.DataFrame) -> pl.DataFrame:
 
 def get_heuristics(
     features: pl.DataFrame,
-) -> Tuple[List[bool], List[bool], List[bool]]:
-    """Gets classification heuristics from feature df.
+) -> Tuple[list[bool], list[bool], list[bool]]:
+    """
+    Gets classification heuristics from feature df.
 
     Args:
         features (pd.DataFrame): features dataframe containing image_type,
@@ -251,7 +298,7 @@ def mode(x: np.ndarray) -> np.ndarray:
     return u[c.argmax()]
 
 
-def get_consensus_predictions(all_predictions: List[np.ndarray]) -> List[str]:
+def get_consensus_predictions(all_predictions: list[np.ndarray]) -> list[str]:
     """Calculates consensus predictions (mode) from a list of prediction
     vectors.
 

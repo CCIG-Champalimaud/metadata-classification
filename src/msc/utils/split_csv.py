@@ -2,7 +2,6 @@ import argparse
 import numpy as np
 import polars as pl
 from numpy.random import default_rng
-from pandas.api.types import is_string_dtype
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(

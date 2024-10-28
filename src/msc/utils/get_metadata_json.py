@@ -7,7 +7,7 @@ from multiprocessing import Pool
 from pathlib import Path
 from tqdm import tqdm
 
-from ..dicom_feature_extraction import extract_all_metadata_from_dicom
+from ..dicom_feature_extraction import extract_features_from_dicom
 
 
 def filter_b_value(d: dict, bval_key: str = "diffusion_bvalue") -> dict:
@@ -49,7 +49,7 @@ def wraper(p: str) -> dict:
     Returns:
         d (dict): metadata dictionary.
     """
-    d = extract_all_metadata_from_dicom(p)
+    d = extract_features_from_dicom(p, join=False, return_paths=True)
     if len(d["file_paths"]) > 0 and d["seg"] == False and d["valid"] == True:
         d = filter_b_value(d)
         # siemens and ge medical systems store the b-values differently by default
@@ -60,7 +60,27 @@ def wraper(p: str) -> dict:
     return d
 
 
-def update_dict(dictionary, individual_id, study_id, sequence_id, d):
+def update_dict(
+    dictionary: dict,
+    individual_id: str,
+    study_id: str,
+    sequence_id: str,
+    d: dict,
+) -> dict:
+    """
+    Updates a hierarchical dictionary with entries per individual, study and
+    sequence unique identifiers (four levels of depth including features).
+
+    Args:
+        dictionary (dict): dictionary to be updated.
+        individual_id (str): individual ID (first level).
+        study_id (str): study ID (second level).
+        sequence_id (str): sequence ID (third level).
+        d (dict): feature dictionary.
+
+    Returns:
+        dict: updated version of dictionary.
+    """
     if len(d["file_paths"]) > 0 and d["seg"] == False:
         if individual_id not in dictionary:
             dictionary[individual_id] = {}

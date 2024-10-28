@@ -9,14 +9,13 @@ from ..dicom_feature_extraction import extract_all_features
 
 class DICOMFeatureExtraction:
     def __init__(
-        self, metadata_features: bool = True, pixel_features: bool = True
+        self, metadata_features: bool = True, image_features: bool = True
     ):
         self.metadata_features = metadata_features
-        self.pixel_features = pixel_features
+        self.image_features = image_features
 
     def __call__(self, p: str) -> dict:
-        """Wraps the metadata extraction and b-value filtering from a DICOM
-        directory path.
+        """Wraps the metadata extraction from a DICOM directory path.
 
         Args:
             p (str): path to DICOM directory.
@@ -27,7 +26,7 @@ class DICOMFeatureExtraction:
         d = extract_all_features(
             p,
             metadata_features=self.metadata_features,
-            pixel_features=self.pixel_features,
+            image_features=self.image_features,
         )
         if len(d["file_path"]) > 0 and d["seg"] == False and d["valid"] == True:
             return d
@@ -45,8 +44,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--feature_types",
         nargs="+",
-        default=["metadata", "pixel"],
-        choices=["metadata", "pixel"],
+        default=["metadata", "image"],
+        choices=["metadata", "image"],
     )
     parser.add_argument("--pattern", default="*")
     parser.add_argument("--individual_pattern", default="*")
@@ -60,7 +59,7 @@ if __name__ == "__main__":
         files.extend([str(x) for x in Path(folder).rglob(args.pattern)])
     extractor = DICOMFeatureExtraction(
         metadata_features="metadata" in args.feature_types,
-        pixel_features="pixel" in args.feature_types,
+        image_features="image" in args.feature_types,
     )
     output = []
     if args.n_workers < 2:
