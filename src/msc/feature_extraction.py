@@ -1,5 +1,5 @@
 import numpy as np
-import pandas as pd
+import polars as pl
 from copy import deepcopy
 from sklearn.feature_extraction.text import CountVectorizer
 
@@ -45,7 +45,12 @@ class SpaceSepNumColsToMatrix:
 
 
 class TextColsToCounts:
-    def __init__(self, text_cols={}, text_num_cols={}, num_cols={}):
+    def __init__(
+        self,
+        text_cols: dict[str, str] = {},
+        text_num_cols: dict[str, str] = {},
+        num_cols: dict[str, str] = {},
+    ):
         self.text_cols = text_cols
         self.text_num_cols = text_num_cols
         self.num_cols = num_cols
@@ -88,32 +93,49 @@ class TextColsToCounts:
             self.new_col_names_.extend(self.col_name_dict_[c])
 
     def transform(self, X, y=None):
-        if isinstance(X, pd.DataFrame):
-            all_cols = {}
-            for k in self.text_cols:
-                all_cols[self.text_cols[k]] = k
-            for k in self.text_num_cols:
-                all_cols[self.text_num_cols[k]] = k
-            for k in self.num_cols:
-                all_cols[self.num_cols[k]] = k
+        if isinstance(X, pl.DataFrame):
+            all_cols = [
+                *[self.text_cols[k] for k in self.text_cols],
+                *[self.text_num_cols[k] for k in self.text_num_cols],
+                *[self.num_cols[k] for k in self.num_cols],
+            ]
+            text_cols = {v: k for k, v in self.text_cols.items()}
+            text_num_cols = {v: k for k, v in self.text_num_cols.items()}
+            num_cols = {v: k for k, v in self.num_cols.items()}
+            output = []
+            for col in all_cols:
+                if col in text_cols:
+                    mat = self.vectorizers_[text_cols[col]].transform(X[:, col])
+                    mat = mat.todense()
+                    t = "text"
+                elif col in text_num_cols:
+                    mat = self.vectorizers_[text_num_cols[col]].transform(
+                        X[:, col]
+                    )
+                    t = "num_text"
+                elif col in num_cols:
+                    mat = np.array(X[:, col])[:, np.newaxis]
+                    t = "num"
+                output.append(np.array(mat))
         else:
-            all_cols = {i: i for i in self.all_cols_}
-        X = np.array(deepcopy(X))
-        output = []
-        for col in all_cols:
-            col = all_cols[col]
-            if col in self.text_cols:
-                mat = self.vectorizers_[col].transform(X[:, col])
-                mat = mat.todense()
-                t = "text"
-            elif col in self.text_num_cols:
-                mat = self.vectorizers_[col].transform(X[:, col])
-                t = "num_text"
-            else:
-                mat = np.array(X[:, col])[:, np.newaxis]
-                t = "num"
-            output.append(np.array(mat))
-        return np.concatenate(output, axis=1).astype(np.float32)
+            X = np.array(deepcopy(X))
+            output = []
+            for col in all_cols:
+                if col in self.text_cols:
+                    mat = self.vectorizers_[col].transform(X[:, col])
+                    mat = mat.todense()
+                    t = "text"
+                elif col in self.text_num_cols:
+                    mat = self.vectorizers_[col].transform(X[:, col])
+                    t = "num_text"
+                elif col in self.num_cols:
+                    mat = np.array(X[:, col])[:, np.newaxis]
+                    t = "num"
+                else:
+                    continue
+                output.append(mat)
+        output = np.concatenate(output, axis=1).astype(np.float32)
+        return output
 
     def fit_transform(self, X, y=None):
         self.fit(X)

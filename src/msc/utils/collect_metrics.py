@@ -2,7 +2,7 @@ import os
 import argparse
 import numpy as np
 import pickle
-import pandas as pd
+import polars as pl
 from glob import glob
 from sklearn.metrics import classification_report, confusion_matrix
 from tqdm import tqdm
@@ -216,4 +216,4 @@ if __name__ == "__main__":
                             metric_dict["fold"].append("all")
                             metric_dict["fraction"].append(fraction)
 
-    pd.DataFrame.from_dict(metric_dict).to_csv(args.output_path, index=False)
+    pl.DataFrame(metric_dict).write_csv(args.output_path)

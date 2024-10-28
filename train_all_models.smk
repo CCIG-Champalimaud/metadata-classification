@@ -94,7 +94,7 @@ rule train_models:
         feature_importance_flag = lambda wc: "" if wc.fraction == '100' else "--skip_feature_importance",
     shell:
         """
-        python3 -m src.msc \
+        python3 -m src.msc.train \
             --input_path {input.data_train} \
             --output_path {output} \
             --n_folds {n_folds} \
@@ -117,7 +117,7 @@ rule train_models_logo:
         feature_importance_flag = "--skip_feature_importance"
     shell:
         """
-        python3 -m src.msc \
+        python3 -m src.msc.train \
             --input_path {input.data_train} \
             --output_path {output} \
             --folds {group_folds} \

@@ -4,15 +4,16 @@ import json
 import re
 import numpy as np
 from multiprocessing import Pool
-from glob import glob
+from pathlib import Path
 from tqdm import tqdm
 
 from ..dicom_feature_extraction import extract_all_metadata_from_dicom
 
 
 def filter_b_value(d: dict, bval_key: str = "diffusion_bvalue") -> dict:
-    """Filters the metadata dictionary and keeps only entries with the
-    maximum b-value.
+    """
+    Filters the metadata dictionary and keeps only entries with the maximum
+    b-value.
 
     Args:
         d (dict): metadata dictionary.
@@ -84,7 +85,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     all_metadata = {}
-    files = glob(os.path.join(args.input_dir, args.pattern))
+    files = [str(x) for x in Path(args.input_dir).glob(args.pattern)]
+    print(files)
     if args.n_workers < 2:
         for f in tqdm(files):
             individual_id = re.search(args.individual_pattern, f).group()

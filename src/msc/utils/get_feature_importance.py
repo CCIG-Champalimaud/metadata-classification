@@ -2,7 +2,7 @@ import os
 import argparse
 import numpy as np
 import pickle
-import pandas as pd
+import polars as pl
 from glob import glob
 from tqdm import tqdm
 
@@ -72,4 +72,4 @@ if __name__ == "__main__":
                 )
                 f_imp_dict["value"].extend(class_f_imp)
                 f_imp_dict["feature"].extend(feature_keys)
-    pd.DataFrame.from_dict(f_imp_dict).to_csv(args.output_path, index=False)
+    pl.DataFrame(f_imp_dict).write_csv(args.output_path)

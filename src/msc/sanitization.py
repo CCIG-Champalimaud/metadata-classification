@@ -1,5 +1,5 @@
 import numpy as np
-import pandas as pd
+import polars as pl
 from .constants import (
     text_sep_cols,
     num_sep_cols,
@@ -7,27 +7,6 @@ from .constants import (
     replace_cols,
     cols_to_drop,
 )
-
-
-def sanitize_input(X, replacements={}, strips=[]):
-    for k in replacements:
-        new_X = []
-        for x in X:
-            if isinstance(x, str) == True:
-                x = x.replace(k, replacements[k])
-            new_X.append(x)
-        X = new_X
-    for s in strips:
-        new_X = []
-        for x in X:
-            if isinstance(x, str) == True:
-                x = x.strip(s)
-            new_X.append(x)
-        X = new_X
-    for i in range(len(X)):
-        if isinstance(X[i], str) == True:
-            X[i] = X[i].lower()
-    return np.array(X)
 
 
 rep_dict = {
@@ -44,55 +23,35 @@ rep_dict = {
 
 
 def sanitize_data(data):
-    for k in text_sep_cols:
-        data[k] = sanitize_input(data[k], rep_dict, [" "])
-    for k in num_sep_cols:
-        data[k] = sanitize_input(data[k], rep_dict, [" "])
-    for k in replace_cols:
-        data.loc[data[k] == "", k] = replace_cols[k]
+    all_cols = list(set([*text_sep_cols, *num_sep_cols, *replace_cols]))
+    col_expressions = []
+    for col in all_cols:
+        pl_col = pl.col(col)
+        if col in text_sep_cols or col in num_sep_cols:
+            for k in rep_dict:
+                pl_col = pl_col.replace(k, rep_dict[k])
+            pl_col = pl_col.str.strip_chars(" ")
+        if col in replace_cols:
+            pl_col = pl_col.replace("", replace_cols[col])
+        pl_col = pl_col.str.to_lowercase()
+        col_expressions.append(col)
+    data = data.with_columns(col_expressions)
     return data
 
 
-def sequence_to_other(X, key_col, from_key, to_key, val_col):
-    if any(from_key == X.loc[:, key_col]) and any(to_key == X.loc[:, key_col]):
-        value = X.loc[X.loc[:, key_col] == from_key, val_col].tolist()[0]
-        X.loc[X.loc[:, key_col] == to_key, val_col] = value
-    return X
-
-
-def sequence_to_other_df(X, group, key_col, from_key, to_key, val_col):
-    return X.groupby(group).apply(
-        lambda x: sequence_to_other(x, key_col, from_key, to_key, val_col)
-    )
-
-
-def data_loading_wraper(
-    data_path, infer: bool = False, keep_series_uid: bool = False
-):
+def data_loading_wraper(data_path, keep_series_uid: bool = False):
     # load data, fix some minor recurring issues
-    data = pd.read_csv(data_path)
-    data.loc[data["class"] == "DCE", "class"] = "dce"
+    data = pl.read_csv(data_path)
+    data = data.with_columns(pl.col("class").str.to_lowercase().alias("class"))
 
     # sanitize data
     data = sanitize_data(data)
-    if infer == True:
-        data = sequence_to_other_df(
-            data,
-            "study_uid",
-            "class",
-            "dwi",
-            "adc",
-            "percent_phase_field_of_view",
-        )
-        data = sequence_to_other_df(
-            data, "study_uid", "class", "dwi", "adc", "sar"
-        )
 
     cols_to_drop_current = list(cols_to_drop)
     if keep_series_uid:
         cols_to_drop_current.remove("series_uid")
-    X = data.drop(cols_to_drop_current, axis=1)
-    y = np.array(data["class"])
+    X = data.drop(cols_to_drop_current)
+    y = data["class"].to_numpy()
     study_uids = data["study_uid"]
     unique_study_uids = list(set(study_uids))
     return X, y, study_uids, unique_study_uids

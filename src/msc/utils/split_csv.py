@@ -1,6 +1,6 @@
 import argparse
 import numpy as np
-import pandas as pd
+import polars as pl
 from numpy.random import default_rng
 from pandas.api.types import is_string_dtype
 
@@ -28,10 +28,8 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    df = pd.read_csv(args.input_path, sep=args.sep, engine="python")
-    for col in df.columns:
-        if is_string_dtype(df[col]):
-            df[col] = df[col].str.replace('"', "")
+    df = pl.read_csv(args.input_path, sep=args.sep, engine="python")
+    df.with_columns([pl.col(pl.String).replace('"', "")])
 
     rng = default_rng(seed=args.random_seed)
 
@@ -52,8 +50,8 @@ if __name__ == "__main__":
         split_a = [i for i, x in enumerate(ids) if x in id_split_a]
         split_b = [i for i, x in enumerate(ids) if x in id_split_b]
 
-    df_a = df.loc[split_a]
-    df_b = df.loc[split_b]
+    df_a = df[split_a]
+    df_b = df[split_b]
 
-    df_a.to_csv(args.output_paths[0], index=False)
-    df_b.to_csv(args.output_paths[1], index=False)
+    df_a.write_csv(args.output_paths[0])
+    df_b.write_csv(args.output_paths[1])

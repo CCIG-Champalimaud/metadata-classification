@@ -1,8 +1,18 @@
 import os
 import re
 import pydicom
+import numpy as np
+from pathlib import Path
 from glob import glob
 from pydicom.filereader import dcmread
+from pydicom.dataset import Dataset
+from scipy import stats
+from skimage.measure import (
+    moments_hu,
+    shannon_entropy,
+    inertia_tensor_eigvals,
+    blur_effect,
+)
 
 seg_sop = "1.2.840.10008.5.1.4.1.1.66.4"
 
@@ -93,7 +103,9 @@ pcai_mapping = {
 }
 
 
-def extract_features_from_dicom(path, join=True, return_paths=False):
+def extract_features_from_dicom(
+    path: str, join: bool = True, return_paths: bool = False
+) -> dict[str, list | str | float | int]:
     file_paths = glob(os.path.join(path, "*dcm"))
     n_images = len(file_paths)
     output_dict = {"number_of_images": n_images}
@@ -149,6 +161,47 @@ def extract_features_from_dicom(path, join=True, return_paths=False):
         output_dict["file_paths"] = file_paths
         output_dict["path"] = path
 
+    return output_dict
+
+
+def extract_metadata_from_file(dicom_file: Dataset):
+    if (0x0008, 0x0016) not in dicom_file:
+        return None
+    # skips file if SOP class is segmentation
+    if dicom_file[0x0008, 0x0016].value == seg_sop:
+        return None
+    output_dict = {}
+    for k in dicom_header_dict:
+        dicom_key = dicom_header_dict[k]
+        dicom_key = (
+            eval("0x{}".format(dicom_key[0])),
+            eval("0x{}".format(dicom_key[1])),
+        )
+        if dicom_key in dicom_file:
+            v = dicom_file[dicom_key].value
+            if k == "diffusion_bvalue_ge":
+                v = eval(str(v))
+                if isinstance(v, list) == False:
+                    v = v.decode()
+                    v = v.split("\\")
+                    v = str(v[0])
+                else:
+                    v = str(v[0])
+                if len(v) > 5:
+                    v = v[-4:]
+            # replace times with empty space...
+            if k == "series_description":
+                v = re.sub("[0-9]+/[0-9]+/[0-9]+", "", v)
+                v = re.sub("[0-9]+-[0-9]+-[0-9]+", "", v)
+                v = re.sub("[0-9]+:[0-9]+:[0-9]+", "", v)
+        else:
+            v = "-"
+        if isinstance(v, pydicom.multival.MultiValue):
+            v = " ".join([str(x) for x in v])
+        if isinstance(v, list):
+            v = " ".join([str(x) for x in v])
+        v = str(v)
+        output_dict[k] = v
     return output_dict
 
 
@@ -210,8 +263,138 @@ def extract_all_metadata_from_dicom(path, skip_seg=True):
     return output_dict
 
 
+def extract_pixel_features(pixel_array: Dataset) -> dict:
+    """
+    Extracts pixel-wise features from a pixel array.
+
+    Args:
+        pixel_array (Dataset): DICOM dataset.
+    Returns:
+        dict: pixel-wise features.
+    """
+    pixel_array = pixel_array.pixel_array.astype(np.float32)
+    flat_array = pixel_array.flatten()
+    features = {
+        "mean": np.mean(pixel_array),
+        "std": np.std(pixel_array),
+        "min": np.min(pixel_array),
+        "max": np.max(pixel_array),
+        "median": np.median(pixel_array),
+        "skew": stats.skew(flat_array),
+        "kurtosis": stats.kurtosis(flat_array),
+        "entropy": shannon_entropy(pixel_array),
+        "rms": np.sqrt(np.mean(pixel_array**2)),
+        "blur_effect": blur_effect(pixel_array),
+        "x": pixel_array.shape[0],
+        "y": pixel_array.shape[1],
+    }
+    moments = {f"moment_{i}": v for i, v in enumerate(moments_hu(pixel_array))}
+    ev = {
+        f"intertia_tensor_eigval_{i}": v
+        for i, v in enumerate(inertia_tensor_eigvals(pixel_array))
+    }
+    features.update(moments)
+    features.update(ev)
+    features = {k: float(features[k]) for k in features}
+    return features
+
+
+def extract_pixel_features_series(path: str) -> dict[str, list]:
+    """
+    Extracts pixel-wise features from a series of DICOM files.
+    Args:
+        path (str): path to DICOM directory.
+    Returns:
+        dict: pixel-wise features.
+    """
+    file_paths = glob(os.path.join(path, "*dcm"))
+    features = []
+    all_keys = []
+    for file in file_paths:
+        dicom_file = dcmread(file)
+        pixel_array = dicom_file.pixel_array
+        features.append(extract_pixel_features(pixel_array))
+        features[-1]["path"] = file
+        for k in features[-1]:
+            if k not in all_keys:
+                all_keys.append(k)
+    features = {k: [x[k] for x in features] for k in all_keys}
+    return features
+
+
+def extract_all_features(
+    path: str, metadata_features: bool = True, pixel_features: bool = True
+) -> dict:
+    """
+    Extracts all features from a DICOM file.
+
+    Args:
+        path (str): path to DICOM file.
+        metadata_features (bool, optional): extract metadata features. Defaults
+            to True.
+        pixel_features (bool, optional): extract pixel features. Defaults to
+            True.
+
+    Returns:
+        dict: all features.
+    """
+
+    study_uid, series_uid, file_name = str(path).split(os.sep)[-3:]
+    features = {
+        "study_uid": study_uid,
+        "series_uid": series_uid,
+        "file_name": file_name,
+        "file_path": path,
+    }
+    dicom_file = dcmread(path)
+
+    valid = True
+    if metadata_features is True:
+        try:
+            features.update(extract_metadata_from_file(dicom_file))
+        except:
+            valid = False
+    if pixel_features is True:
+        try:
+            features.update(extract_pixel_features(dicom_file))
+        except:
+            valid = False
+
+    features["seg"] = dicom_file[0x0008, 0x0016].value == seg_sop
+    features["valid"] = valid
+    return features
+
+
+def extract_all_features_series(
+    path: str, metadata_features: bool = True, pixel_features: bool = True
+) -> dict:
+    """
+    Extracts all features from a DICOM directory.
+
+    Args:
+        path (str): path to DICOM directory.
+        metadata_features (bool, optional): extract metadata features. Defaults
+            to True.
+        pixel_features (bool, optional): extract pixel features. Defaults to
+            True.
+
+    Returns:
+        dict: all features.
+    """
+    file_list = Path(path).rglob("*dcm")
+    all_keys = []
+    all_features = []
+    for file in file_list:
+        features = extract_all_features(file, metadata_features, pixel_features)
+        for k in features:
+            if k not in all_keys:
+                all_keys.append(k)
+        all_features.append(features)
+    return {k: [x[k] for x in all_features] for k in all_keys}
+
+
 if __name__ == "__main__":
     import sys
     import json
 
-    print(json.dumps(extract_features_from_dicom(sys.argv[1]), indent=1))
+    print(json.dumps(extract_all_features_series(sys.argv[1]), indent=1))
