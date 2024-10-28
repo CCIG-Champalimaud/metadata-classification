@@ -69,7 +69,7 @@ if __name__ == "__main__":
         else:
             subset = int(args.subset * X.shape[0])
         idxs = np.random.choice(X.shape[0], subset, replace=False)
-        X = X.loc[idxs]
+        X = X[idxs]
         y = y[idxs]
         study_uids = study_uids[idxs]
     if args.folds is None:
@@ -122,9 +122,9 @@ if __name__ == "__main__":
             i for i, x in enumerate(study_uids) if x in train_uids
         ]
         val_idxs_long = [i for i, x in enumerate(study_uids) if x in val_uids]
-        training_X = X.iloc[train_idxs_long]
+        training_X = X[train_idxs_long]
         training_y = y[train_idxs_long]
-        val_X = X.iloc[val_idxs_long]
+        val_X = X[val_idxs_long]
         val_y = y[val_idxs_long]
 
         print("\tTransforming data")
