@@ -2,6 +2,7 @@ import argparse
 import numpy as np
 import polars as pl
 from numpy.random import default_rng
+from ..data_loading import read_data_csv_tsv, read_parquet
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -27,7 +28,12 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    df = pl.read_csv(args.input_path, sep=args.sep, engine="python")
+    extension = args.input_path.split(".")[-1]
+    if extension == "csv" or extension == "tsv":
+        df = pl.read_csv(args.input_path, sep=args.sep)
+    elif extension == "parquet":
+        df = pl.read_parquet(args.input_path)
+
     df.with_columns([pl.col(pl.String).replace('"', "")])
 
     rng = default_rng(seed=args.random_seed)
@@ -38,19 +44,25 @@ if __name__ == "__main__":
         )
         split_a = split
         split_b = [i for i in range(df.shape[0]) if i not in split_a]
+        df_a = df[split_a]
+        df_b = df[split_b]
     else:
-        ids = df[args.id_col]
-        unique_ids = np.unique(ids)
+        unique_ids = df[args.id_col].unique()
         id_split = rng.choice(
             unique_ids, int(args.split_ratio * len(unique_ids)), replace=False
         )
         id_split_a = id_split
         id_split_b = [i for i in unique_ids if i not in id_split]
-        split_a = [i for i, x in enumerate(ids) if x in id_split_a]
-        split_b = [i for i, x in enumerate(ids) if x in id_split_b]
+        df_a = df.filter(pl.col(args.id_col).is_in(id_split_a))
+        df_b = df.filter(pl.col(args.id_col).is_in(id_split_b))
 
-    df_a = df[split_a]
-    df_b = df[split_b]
-
-    df_a.write_csv(args.output_paths[0])
-    df_b.write_csv(args.output_paths[1])
+    output_extension = args.output_paths[0].split(".")[-1]
+    if output_extension == "csv":
+        df_a.write_csv(args.output_paths[0])
+        df_b.write_csv(args.output_paths[1])
+    elif output_extension == "tsv":
+        df_a.write_csv(args.output_paths[0], sep="\t")
+        df_b.write_csv(args.output_paths[1], sep="\t")
+    elif output_extension == "parquet":
+        df_a.write_parquet(args.output_paths[0])
+        df_b.write_parquet(args.output_paths[1])
