@@ -2,6 +2,9 @@ text_sep_cols = [
     "image_type",
     "sequence_variant",
     "diffusion_bvalue",
+    "diffusion_bvalue_ge",
+    "diffusion_bvalue_siemens",
+    "diffusion_bvalue_final",
     "in_plane_phase_encoding_direction",
     "mr_acquisition_type",
     "patient_position",
@@ -38,7 +41,28 @@ num_sep_cols = [
     "number_of_temporal_positions",
 ]
 
-num_cols = ["number_of_images"]
+num_cols = [
+    "number_of_images",
+    "image_mean",
+    "image_std",
+    "image_min",
+    "image_max",
+    "image_median",
+    "image_skew",
+    "image_kurtosis",
+    "image_entropy",
+    "image_rms",
+    "image_blur_effect",
+    "image_moment_0",
+    "image_moment_1",
+    "image_moment_2",
+    "image_moment_3",
+    "image_moment_4",
+    "image_moment_5",
+    "image_moment_6",
+    "image_intertia_tensor_eigval_0",
+    "image_intertia_tensor_eigval_1",
+]
 
 cols_to_drop = [
     "study_uid",
@@ -49,10 +73,17 @@ cols_to_drop = [
     "reconstruction_matrix",
     "number_of_phase_encoding_steps",
     "inversion_time",
+    "image_x",
+    "image_y",
+    "seg",
+    "valid",
 ]
 
 replace_cols = {
     "diffusion_bvalue": "-",
+    "diffusion_bvalue_ge": "-",
+    "diffusion_bvalue_siemens": "-",
+    "diffusion_bvalue_final": "-",
     "number_of_echos": "1",
     "number_of_temporal_positions": "1",
     "temporal_resolution": "0",
