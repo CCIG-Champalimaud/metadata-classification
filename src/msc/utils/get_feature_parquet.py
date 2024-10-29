@@ -64,7 +64,7 @@ if __name__ == "__main__":
     output = []
     if args.n_workers < 2:
         it = map(extractor, files)
-        with tqdm(it, total=len(files)) as pbar:
+        with tqdm(it, total=len(files), smoothing=1.0) as pbar:
             for f in pbar:
                 if f is not None:
                     output.append(f)
