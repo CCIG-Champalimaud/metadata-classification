@@ -29,6 +29,21 @@ class SpaceSepNumColsToMatrix(BaseEstimator, TransformerMixin):
         self.default_value = default_value
         self.split_char = split_char
 
+    def to_polars(self, X: np.ndarray | pl.DataFrame) -> pl.DataFrame:
+        """
+        Converts a numpy array or polars DataFrame to a polars DataFrame.
+
+        Args:
+            X (np.ndarray | pl.DataFrame): input data.
+
+        Returns:
+            pl.DataFrame: polars DataFrame.
+        """
+        if isinstance(X, pl.DataFrame) is False:
+            X = pl.DataFrame({"feature": X})
+        X.columns = ["feature"]
+        return X
+
     def fit(self, X: np.ndarray, y: None = None) -> BaseEstimator:
         """
         Fits the transformer.
@@ -37,8 +52,10 @@ class SpaceSepNumColsToMatrix(BaseEstimator, TransformerMixin):
             X (np.ndarray): input data.
             y (None, optional): not used. Defaults to None.
         """
-        mat = [x.strip().split(self.split_char) for x in X]
-        sizes, counts = np.unique([len(x) for x in mat], return_counts=True)
+        X = self.to_polars(X)
+        sizes = X.with_columns(
+            pl.col("feature").str.split(" ").list.len().alias("feature")
+        )["feature"].to_list()
         if self.standard is False:
             self.transform_ = "sum_size"
             self.n_features_ = 5
@@ -48,26 +65,6 @@ class SpaceSepNumColsToMatrix(BaseEstimator, TransformerMixin):
             self.n_features_ = sizes[0]
             self.feature_names_ = [i for i in range(self.n_features_)]
         return self
-
-    def safe_feat(
-        self, x: list
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        """
-
-        Args:
-            x (list): extracts the sum, minimum, maximum and mean of a list of
-                numbers. If an error is throwed, returns a tuple of the default
-                value for each of the four features.
-
-        Returns:
-            tuple: sum, minimum, maximum and mean of a list of numbers.
-        """
-        try:
-            x = [i for i in x if i != ""]
-            x = np.float32(x)
-            return x.sum(), x.min(), x.max(), x.mean()
-        except:
-            return tuple([self.default_value for _ in range(4)])
 
     def transform(self, X: np.ndarray, y: None = None) -> np.ndarray:
         """
@@ -87,14 +84,34 @@ class SpaceSepNumColsToMatrix(BaseEstimator, TransformerMixin):
             np.ndarray: transformed data.
         """
 
-        mat = [x.strip().split(self.split_char) for x in X]
+        X = self.to_polars(X)
         if self.transform_ == "standard":
+            X = np.array(
+                X.with_columns(pl.col("feature").str.split(" ").explode())
+            )
             mat = np.array(mat).astype(np.float32)
             if mat.shape[1] != self.n_features_:
                 raise Exception("different number of elements")
         elif self.transform_ == "sum_size":
-            mat = np.array([[len(x), *self.safe_feat(x)] for x in mat])
-        return mat.astype(np.float32)
+            mat = np.array(
+                X.with_columns(
+                    pl.col("feature")
+                    .str.split(" ")
+                    .alias("feature")
+                    .list.eval(pl.element().cast(pl.Float32, strict=False))
+                )
+                .with_columns(
+                    # ["length", "sum", "min", "max", "mean"]
+                    pl.col("feature").list.len().alias("length"),
+                    pl.col("feature").list.sum().alias("sum"),
+                    pl.col("feature").list.min().alias("min"),
+                    pl.col("feature").list.max().alias("max"),
+                    pl.col("feature").list.mean().alias("mean"),
+                )
+                .drop("feature")
+            )
+            mat[np.isnan(mat)] = self.default_value
+        return mat
 
     def fit_transform(self, X, y=None) -> np.ndarray:
         self.fit(X)
@@ -173,7 +190,6 @@ class TextColsToCounts(BaseEstimator, TransformerMixin):
             ]
         for col in self.num_cols:
             self.col_name_dict_[col] = [self.num_cols[col]]
-
         self.new_col_names_ = []
         for c in self.col_name_dict_:
             self.new_col_names_.extend(self.col_name_dict_[c])
