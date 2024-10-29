@@ -219,6 +219,15 @@ def extract_metadata_from_file(dicom_file: Dataset) -> dict:
         v = process_multivalues(v)
         output_dict[k] = v
 
+    for bvalue_key in [
+        "diffusion_bvalue",
+        "diffusion_bvalue_ge",
+        "diffusion_bvalue_siemens",
+    ]:
+        if output_dict[bvalue_key] != "-":
+            output_dict["diffusion_bvalue_final"] = output_dict[bvalue_key]
+            break
+
     return output_dict
 
 
@@ -285,22 +294,24 @@ def extract_pixel_features(pixel_array: Dataset) -> dict:
     pixel_array = pixel_array.pixel_array.astype(np.float32)
     flat_array = pixel_array.flatten()
     features = {
-        "mean": np.mean(pixel_array),
-        "std": np.std(pixel_array),
-        "min": np.min(pixel_array),
-        "max": np.max(pixel_array),
-        "median": np.median(pixel_array),
-        "skew": stats.skew(flat_array),
-        "kurtosis": stats.kurtosis(flat_array),
-        "entropy": shannon_entropy(pixel_array),
-        "rms": np.sqrt(np.mean(pixel_array**2)),
-        "blur_effect": blur_effect(pixel_array),
-        "x": pixel_array.shape[0],
-        "y": pixel_array.shape[1],
+        "image_mean": np.mean(pixel_array),
+        "image_std": np.std(pixel_array),
+        "image_min": np.min(pixel_array),
+        "image_max": np.max(pixel_array),
+        "image_median": np.median(pixel_array),
+        "image_skew": stats.skew(flat_array),
+        "image_kurtosis": stats.kurtosis(flat_array),
+        "image_entropy": shannon_entropy(pixel_array),
+        "image_rms": np.sqrt(np.mean(pixel_array**2)),
+        "image_blur_effect": blur_effect(pixel_array),
+        "image_x": pixel_array.shape[0],
+        "image_y": pixel_array.shape[1],
     }
-    moments = {f"moment_{i}": v for i, v in enumerate(moments_hu(pixel_array))}
+    moments = {
+        f"image_moment_{i}": v for i, v in enumerate(moments_hu(pixel_array))
+    }
     ev = {
-        f"intertia_tensor_eigval_{i}": v
+        f"image_intertia_tensor_eigval_{i}": v
         for i, v in enumerate(inertia_tensor_eigvals(pixel_array))
     }
     features.update(moments)
