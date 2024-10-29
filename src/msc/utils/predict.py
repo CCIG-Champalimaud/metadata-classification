@@ -108,6 +108,21 @@ def get_consensus_predictions(all_predictions: list[np.ndarray]) -> list[str]:
     return consensus_pred
 
 
+def get_average_predictions(all_predictions: list[np.ndarray]) -> list[str]:
+    """Calculates average from a list of prediction vectors.
+
+    Args:
+        all_predictions (List[np.ndarray]): list of prediction vectors.
+
+    Returns:
+        List[str]: average predictions.
+    """
+    consensus_pred = (
+        np.concatenate(all_predictions, axis=1).mean(axis=1).tolist()
+    )
+    return consensus_pred
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Predicts the type of sequence."
@@ -160,6 +175,7 @@ if __name__ == "__main__":
     # predict
     for model_path in args.model_paths:
         model = dill.load(open(model_path, "rb"))
+        task = model["args"].get("task_name", "classification")
         for fold in model["cv"]:
             if fold["count_vec"] is not None:
                 is_catboost = False
@@ -189,11 +205,16 @@ if __name__ == "__main__":
                 prediction = fold["model"].predict(dat)
                 all_predictions_fold.append(prediction.astype(str))
 
-    # aggregate prediction consensus
-    consensus_pred = get_consensus_predictions(all_predictions_fold)
+    if task == "classification":
+        # aggregate prediction consensus
+        consensus_pred = get_consensus_predictions(all_predictions_fold)
 
-    # calculate heuristics
-    heuristics_df = get_heuristics(features)
+        # calculate heuristics
+        heuristics_df = get_heuristics(features)
+
+    elif task == "regression":
+        # aggregate prediction average
+        consensus_pred = get_average_predictions(all_predictions_fold)
 
     # merge predictions with heuristics
     if "patient_id" in features:
