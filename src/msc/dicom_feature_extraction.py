@@ -344,7 +344,7 @@ def extract_pixel_features(dicom_file: Dataset) -> dict:
         f"image_moment_{i}": v for i, v in enumerate(moments_hu(pixel_array))
     }
     ev = {
-        f"image_intertia_tensor_eigval_{i}": v
+        f"image_inertia_tensor_eigval_{i}": v
         for i, v in enumerate(inertia_tensor_eigvals(pixel_array))
     }
     features.update(moments)
