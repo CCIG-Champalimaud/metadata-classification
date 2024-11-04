@@ -6,7 +6,7 @@ from multiprocessing import Pool
 from tqdm import tqdm
 from .dicom_feature_extraction import (
     extract_features_from_dicom,
-    dicom_header_dict,
+    image_feature_keys,
 )
 from .sanitization import sanitize_data
 from .constants import cols_to_drop
@@ -43,7 +43,7 @@ def read_data_dicom_dataset(
                 if k not in features:
                     features[k] = []
                 features[k].append(f[k])
-    features = pl.from_dict(features)
+    features = pl.from_dict({k: features[k][0] for k in features})
     return features
 
 
@@ -77,7 +77,6 @@ def read_json(input_path: str):
                 for metadata_key in md_dict:
                     if all(
                         [
-                            metadata_key in dicom_header_dict,
                             metadata_key != "patient_id",
                             metadata_key != "study_uid",
                             metadata_key != "series_uid",
@@ -130,8 +129,16 @@ def summarise_columns(
             .alias(k)
         )
         for k in cols
-        if (k not in group_cols) and (k in dicom_header_dict)
+        if (k not in group_cols)
+        and (k not in ["number_of_images", "number_of_frames"])
+        and k not in image_feature_keys
     ]
+    numerical_col_expressions = [
+        pl.col(k).cast(pl.Float32).mean()
+        for k in cols
+        if k in image_feature_keys
+    ]
+    col_expressions.extend(numerical_col_expressions)
     if "number_of_images" in x:
         col_expressions.append(
             (pl.col("number_of_images").cast(pl.Int32).median())
@@ -154,7 +161,10 @@ def summarise_columns(
 
 
 def read_data(
-    input_paths: list[str] | str, dicom_recursion: int = 0, n_workers: int = 0
+    input_paths: list[str] | str,
+    dicom_recursion: int = 0,
+    n_workers: int = 0,
+    group_cols: list[str] | None = ["study_uid", "series_uid", "patient_id"],
 ) -> pl.DataFrame:
     """
     Reads data which can be in multiple formats. The supported data formats are:
@@ -182,6 +192,9 @@ def read_data(
             recursion depth. Defaults to 0.
         n_workers (int, optional): number of parallel workers when recursion is
             specified. Defaults to 0.
+        group_cols (list[str] | None, optional): columns to use as groups when
+            summarising columns. Defaults to ["study_uid", "series_uid",
+            "patient_id"].
 
     Returns:
         pl.DataFrame: DICOM feature dataframe.
@@ -212,11 +225,13 @@ def read_data(
             raise NotImplementedError(
                 "Input must be DICOM series dir or csv, tsv or parquet file"
             )
+
     if len(all_features) > 1:
         all_features = pl.concat(all_features, how="vertical")
     else:
         all_features = all_features[0]
-    all_features = summarise_columns(all_features)
+    if group_cols is not None:
+        all_features = summarise_columns(all_features, group_cols)
     return all_features
 
 

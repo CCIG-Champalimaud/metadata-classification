@@ -4,81 +4,11 @@ import numpy as np
 import polars as pl
 from scipy.stats import mode
 from catboost import FeaturesData
-from tqdm import tqdm
-from typing import Tuple, list
-from ..dicom_feature_extraction import dicom_header_dict
 from ..feature_extraction import TextColsToCounts
 from ..constants import text_sep_cols, num_sep_cols, num_cols
 from ..sanitization import sanitize_data
 from ..data_loading import read_data
-
-
-def get_heuristics(
-    features: pl.DataFrame,
-) -> Tuple[list[bool], list[bool], list[bool]]:
-    """
-    Gets classification heuristics from feature df.
-
-    Args:
-        features (pd.DataFrame): features dataframe containing image_type,
-            series_description, diffusion_bvalue, diffusion_bvalue_siemens
-            and diffusion_bvalue_ge columns.
-
-    Returns:
-        Tuple[List[bool], List[bool], List[bool]]: boolean index vectors
-            corresponding to positive classifications for T2W, ADC and DWI
-            sequences.
-    """
-    is_dwi_bool_idx = []
-    is_t2w_bool_idx = []
-    is_adc_bool_idx = []
-    image_types = features["image_type"].to_list()
-    series_descriptions = features["series_description"].to_list()
-    bvalues = features["diffusion_bvalue"].to_list()
-    for key in ["diffusion_bvalue_ge", "diffusion_bvalue_siemens"]:
-        if key in features:
-            bvalues_proxy = features[key].to_list()
-            for i in range(len(bvalues)):
-                if bvalues[i] == "-" and bvalues_proxy[i] != "-":
-                    bvalues[i] = bvalues_proxy[i]
-    for it, sd, f in zip(image_types, series_descriptions, bvalues):
-        it = it.lower()
-        sd = sd.lower()
-        f = [
-            float(x) if x.replace(".", "").isnumeric() else 0
-            for x in np.unique(f.split())
-        ]
-        if len(f) == 0:
-            f = 0
-        f = np.max(np.int32(f))
-        # check if it can be t2w ("t2" substring in sd AND no
-        # "cor" or "sag" substring)
-        if ("t2" in sd) and ("cor" not in sd) and ("sag" not in sd):
-            is_t2w_bool_idx.append(True)
-        else:
-            is_t2w_bool_idx.append(False)
-        # check if it can be dwi by seeing whether the maximum
-        # b-value is greater than 0 and that "adc" is not in the
-        # series description or image type
-        if f > 0 and ("adc" not in sd) and ("adc" not in it):
-            is_dwi_bool_idx.append(True)
-        else:
-            is_dwi_bool_idx.append(False)
-        # check if it can be adc ("adc" substring in it)
-        if ("adc" in it) or ("adc" in sd.split(" ")):
-            is_adc_bool_idx.append(True)
-        else:
-            is_adc_bool_idx.append(False)
-    heuristics_df = pl.DataFrame(
-        {
-            "study_uid": features["study_uid"],
-            "series_uid": features["series_uid"],
-            "t2w_heuristics": is_t2w_bool_idx,
-            "adc_heuristics": is_adc_bool_idx,
-            "dwi_heuristics": is_dwi_bool_idx,
-        }
-    )
-    return heuristics_df
+from ..heuristics import heuristics_dict
 
 
 def mode(x: np.ndarray) -> np.ndarray:
@@ -144,6 +74,26 @@ if __name__ == "__main__":
         help="How deep in the folder structure are DICOM series",
     )
     parser.add_argument(
+        "--heuristics",
+        type=str,
+        default=None,
+        help="Heuristic function to apply to the data",
+        choices=list(heuristics_dict.keys()),
+    )
+    parser.add_argument(
+        "--classes",
+        type=str,
+        nargs="+",
+        help="Sorted list of classes to predict",
+    )
+    parser.add_argument(
+        "--reduce",
+        default="series",
+        type=str,
+        help="Whether to reduce features to instance, series or study level",
+        choices=["instance", "series", "study"],
+    )
+    parser.add_argument(
         "--n_workers",
         type=int,
         default=0,
@@ -152,18 +102,26 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    # if it's a directory, assume it's a directory containing .dcm files
+    if args.reduce == "series":
+        group_cols = ["study_uid", "series_uid", "patient_id"]
+    elif args.reduce == "study":
+        group_cols = ["study_uid", "patient_id"]
+    elif args.reduce == "instance":
+        group_cols = None
     features = read_data(
         args.input_paths,
         dicom_recursion=args.dicom_recursion,
         n_workers=args.n_workers,
+        group_cols=group_cols,
     )
     features = sanitize_data(features)
     features = features.sort(by=["study_uid", "series_uid"])
 
     # setup models
     all_predictions = []
-    match = np.array(["ADC", "DCE", "DWI", "Others", "T2"], dtype=str)
+    match = None
+    if args.classes is not None:
+        match = np.array(args.classes, dtype=str)
     all_predictions_fold = []
     all_series_uid = features["series_uid"]
     all_study_uid = features["study_uid"]
@@ -183,9 +141,14 @@ if __name__ == "__main__":
                 count_vec.cols_to_drop = ["series_uid", "study_uid"]
                 transformed_features = count_vec.transform(features)
                 prediction = fold["model"].predict(transformed_features)
-                all_predictions_fold.append(
-                    np.char.upper(match[prediction.astype(np.int32)])[:, None]
-                )
+                if match is not None:
+                    all_predictions_fold.append(
+                        np.char.upper(match[prediction.astype(np.int32)])[
+                            :, None
+                        ]
+                    )
+                else:
+                    all_predictions_fold.append(prediction.astype(str)[:, None])
             else:
                 is_catboost = True
                 fc = text_sep_cols + num_sep_cols
@@ -205,53 +168,62 @@ if __name__ == "__main__":
                 prediction = fold["model"].predict(dat)
                 all_predictions_fold.append(prediction.astype(str))
 
-    if task == "classification":
-        # aggregate prediction consensus
-        consensus_pred = get_consensus_predictions(all_predictions_fold)
-
-        # calculate heuristics
-        heuristics_df = get_heuristics(features)
-
-    elif task == "regression":
-        # aggregate prediction average
-        consensus_pred = get_average_predictions(all_predictions_fold)
-
-    # merge predictions with heuristics
     if "patient_id" in features:
         patient_id = features["patient_id"]
     else:
         patient_id = features["study_uid"]
-    predictions_df = (
-        pl.from_dict(
+
+    if task == "classification":
+        # aggregate prediction consensus
+        consensus_pred = get_consensus_predictions(all_predictions_fold)
+
+        predictions_df = pl.from_dict(
             {
                 "patient_id": patient_id,
                 "study_uid": features["study_uid"],
                 "series_uid": features["series_uid"],
                 "prediction": consensus_pred,
+                "prediction_heuristics": consensus_pred,
             }
         )
-        .join(heuristics_df, on=["study_uid", "series_uid"])
-        .with_columns(pl.col("prediction").alias("prediction_heuristics"))
-        .with_columns(
-            pl.when(pl.col("t2w_heuristics") == True)
-            .then(pl.lit("T2"))
-            .when(pl.col("dwi_heuristics") == True)
-            .then(pl.lit("DWI"))
-            .when(pl.col("adc_heuristics") == True)
-            .then(pl.lit("ADC"))
-            .otherwise(pl.col("prediction_heuristics"))
-            .alias("prediction_heuristics")
-        )
-        .select(
-            [
-                "patient_id",
-                "study_uid",
-                "series_uid",
-                "prediction",
-                "prediction_heuristics",
+
+        # calculate heuristics
+        if args.heuristics is not None:
+            heuristics_df = heuristics_dict[args.heuristics](features)
+            feature_cols = [
+                x
+                for x in heuristics_df.columns
+                if x not in ["study_uid", "series_uid"]
             ]
-        )
-    )
+            heuristics_fn = pl.when(pl.col(feature_cols[0]) == True).then(
+                pl.lit(feature_cols[0])
+            )
+            for x in feature_cols[1:]:
+                heuristics_fn = heuristics_fn.when(pl.col(x) == True).then(
+                    pl.lit(x)
+                )
+            heuristics_fn = heuristics_fn.otherwise(
+                pl.col("prediction_heuristics")
+            ).alias("prediction_heuristics")
+            predictions_df = (
+                predictions_df.join(
+                    heuristics_df, on=["study_uid", "series_uid"]
+                )
+                .with_columns(heuristics_fn)
+                .select(
+                    [
+                        "patient_id",
+                        "study_uid",
+                        "series_uid",
+                        "prediction",
+                        "prediction_heuristics",
+                    ]
+                )
+            )
+
+    elif task == "regression":
+        # aggregate prediction average
+        consensus_pred = get_average_predictions(all_predictions_fold)
 
     # print predctions
     print(predictions_df.to_pandas().to_csv(index=False))

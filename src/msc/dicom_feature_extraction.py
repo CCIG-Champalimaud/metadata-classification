@@ -103,6 +103,32 @@ pcai_mapping = {
     "0008,103e": "series_description",
 }
 
+image_feature_keys = [
+    "image_mean",
+    "image_std",
+    "image_min",
+    "image_max",
+    "image_median",
+    "image_skew",
+    "image_kurtosis",
+    "image_entropy",
+    "image_rms",
+    "image_blur_effect",
+    "image_x",
+    "image_y",
+    "image_moment_0",
+    "image_moment_1",
+    "image_moment_2",
+    "image_moment_3",
+    "image_moment_4",
+    "image_moment_5",
+    "image_moment_6",
+    "image_intertia_tensor_eigval_0",
+    "image_intertia_tensor_eigval_1",
+    "image_intertia_tensor_eigval_2",
+    "image_intertia_tensor_eigval_3",
+]
+
 converted_dicom_header_dict = {
     k: (eval("0x{}".format(v[0])), eval("0x{}".format(v[1])))
     for k, v in dicom_header_dict.items()
@@ -202,7 +228,7 @@ def extract_metadata_from_file(dicom_file: Dataset) -> dict:
     Returns:
         dict: extracted metadata (available in ``dicom_header_dict``).
     """
-    output_dict = {}
+    output_dict = {"valid": True, "seg": False}
     if (0x0008, 0x0016) not in dicom_file:
         dicom_file["valid"] = False
     # skips file if SOP class is segmentation
@@ -219,6 +245,7 @@ def extract_metadata_from_file(dicom_file: Dataset) -> dict:
         v = process_multivalues(v)
         output_dict[k] = v
 
+    output_dict["diffusion_bvalue_final"] = "-"
     for bvalue_key in [
         "diffusion_bvalue",
         "diffusion_bvalue_ge",
@@ -232,7 +259,10 @@ def extract_metadata_from_file(dicom_file: Dataset) -> dict:
 
 
 def extract_features_from_dicom(
-    path: str, join: bool = True, return_paths: bool = False
+    path: str,
+    join: bool = False,
+    return_paths: bool = False,
+    image_features: bool = True,
 ) -> dict[str, list | str | float | int]:
     """
     Extract features (specified in ``dicom_header_dict``) from DICOM files in a
@@ -244,6 +274,8 @@ def extract_features_from_dicom(
             ``'|'`` after feature extraction. Defaults to True.
         return_paths (bool, optional): whether paths should be returned.
             Defaults to False.
+        image_features (bool, optional): whether image features should be
+            extracted. Defaults to False.
 
     Returns:
         dict[str, list | str | float | int]: a dictionary with features.
@@ -253,45 +285,46 @@ def extract_features_from_dicom(
     output_dict = {"number_of_images": n_images}
     for file in file_paths:
         try:
-            dicom_file = dcmread(file, stop_before_pixels=True)
+            dicom_file = dcmread(file, stop_before_pixels=not image_features)
         except:
             continue
 
         features = extract_metadata_from_file(dicom_file)
         if features is None:
             continue
+        if image_features is True and (0x7FE0, 0x0010) in dicom_file:
+            features.update(extract_pixel_features(dicom_file))
 
         for k in features:
             if k not in output_dict:
                 output_dict[k] = []
-            if features[k] not in output_dict[k]:
-                output_dict[k].append(features[k])
+            output_dict[k].append(features[k])
 
-    if join == True:
+    if join is True:
         for k in output_dict:
-            if k != "number_of_images":
-                output_dict[k] = "|".join(output_dict[k])
+            if (
+                k not in ["number_of_images", "seg", "valid"]
+                and k not in image_feature_keys
+            ):
+                output_dict[k] = "|".join(set(list(output_dict[k])))
 
     if return_paths == True:
         output_dict["file_paths"] = file_paths
         output_dict["path"] = path
 
-    output_dict["seg"] = True in output_dict["seg"]
-    output_dict["valid"] = all(output_dict["valid"])
-
     return output_dict
 
 
-def extract_pixel_features(pixel_array: Dataset) -> dict:
+def extract_pixel_features(dicom_file: Dataset) -> dict:
     """
     Extracts pixel-wise features from a pixel array.
 
     Args:
-        pixel_array (Dataset): DICOM dataset.
+        dicom_file (Dataset): DICOM dataset.
     Returns:
         dict: pixel-wise features.
     """
-    pixel_array = pixel_array.pixel_array.astype(np.float32)
+    pixel_array = dicom_file.pixel_array.astype(np.float32)
     flat_array = pixel_array.flatten()
     features = {
         "image_mean": np.mean(pixel_array),
