@@ -1,7 +1,7 @@
 [project]
 name = "metadata-sequence-classification"
 version = "0.1.0"
-description = "Add your description here"
+description = "Toolbox for automatic DICOM metadata extraction and classification/regression."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
