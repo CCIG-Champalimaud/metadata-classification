@@ -1,36 +1,24 @@
 import argparse
-import numpy as np
 import polars as pl
 from numpy.random import default_rng
-from ..data_loading import read_data_csv_tsv, read_parquet
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Splits a CSV-type file into two different sets."
     )
 
-    parser.add_argument(
-        "--input_path", dest="input_path", type=str, required=True
-    )
-    parser.add_argument(
-        "--sep", dest="sep", default=None, type=str, required=False
-    )
-    parser.add_argument("--id_col", dest="id_col", default=None, type=str)
-    parser.add_argument(
-        "--output_paths", dest="output_paths", nargs=2, type=str, required=True
-    )
-    parser.add_argument(
-        "--split_ratio", dest="split_ratio", type=float, default=0.8
-    )
-    parser.add_argument(
-        "--random_seed", dest="random_seed", default=42, type=int
-    )
+    parser.add_argument("--input_path", type=str, required=True)
+    parser.add_argument("--id_col", default=None, type=str)
+    parser.add_argument("--output_paths", nargs=2, type=str, required=True)
+    parser.add_argument("--split_ratio", type=float, default=0.8)
+    parser.add_argument("--random_seed", default=42, type=int)
 
     args = parser.parse_args()
 
     extension = args.input_path.split(".")[-1]
     if extension == "csv" or extension == "tsv":
-        df = pl.read_csv(args.input_path, sep=args.sep)
+        sep = "," if extension == "csv" else "\t"
+        df = pl.read_csv(args.input_path, sep=sep)
     elif extension == "parquet":
         df = pl.read_parquet(args.input_path)
 
