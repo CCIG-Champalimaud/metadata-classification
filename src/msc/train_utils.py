@@ -109,7 +109,7 @@ model_dict = {
         "xgb": {
             "model": XGBRegressor,
             "params": {
-                "objective": "reg:tweedie",
+                "objective": "reg:squarederror",
                 "n_jobs": 2,
                 "tree_method": "gpu_hist",
                 "predictor": "auto",
