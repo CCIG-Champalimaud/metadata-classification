@@ -403,21 +403,26 @@ def extract_all_features(
         "file_name": file_name,
         "file_path": path,
     }
-    dicom_file = dcmread(path)
-
     valid = True
-    if metadata_features is True:
-        try:
-            features.update(extract_metadata_from_file(dicom_file))
-        except:
-            valid = False
-    if image_features is True:
-        try:
-            features.update(extract_pixel_features(dicom_file))
-        except:
-            valid = False
+    try:
+        dicom_file = dcmread(path)
+    except:
+        valid = False
 
-    features["seg"] = dicom_file[0x0008, 0x0016].value == seg_sop
+    if valid:
+        if metadata_features is True:
+            try:
+                features.update(extract_metadata_from_file(dicom_file))
+            except:
+                valid = False
+        if image_features is True:
+            try:
+                features.update(extract_pixel_features(dicom_file))
+            except:
+                valid = False
+        features["seg"] = dicom_file[0x0008, 0x0016].value == seg_sop
+    else:
+        features["seg"] = False
     features["valid"] = valid
     return features
 
