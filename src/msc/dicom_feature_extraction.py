@@ -60,6 +60,8 @@ dicom_header_dict = dict(
     diffusion_bvalue_siemens=("0019", "100C"),
 )
 
+inverted_dicom_header_dict = {v: k for k, v in dicom_header_dict.items()}
+
 pcai_mapping = {
     "0010,0020": "patient_id",
     "0020,000d": "study_uid",

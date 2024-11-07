@@ -1,0 +1,10 @@
+model_dict:
+  prostate_mpmri: "/storage/models/metadata/models/xgb.standard.100.pkl"
+matches:
+  prostate_mpmri: ["ADC", "DCE", "DWI", "Others", "T2W"]
+heuristics:
+  prostate_mpmri: "prostate_mpmri"
+filters:
+  prostate_mpmri:
+    BodyPartExamined: ["PROSTATE", "PELVIS", "GENITOURINARY SYSTEM"]
+    Modality: ["MR"]

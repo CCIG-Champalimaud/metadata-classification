@@ -55,7 +55,7 @@ def read_data_dicom_dataset(
 
 def read_data_dicom(input_path: str):
     features = extract_features_from_dicom(input_path)
-    features = {k: [features[k]] for k in features}
+    features = {k: features[k] for k in features}
     features = pl.from_dict(features)
     return features
 

@@ -209,12 +209,12 @@ class TextColsToCounts(BaseEstimator, TransformerMixin):
         Returns:
             np.ndarray: transformed array.
         """
+        all_cols = [
+            *[self.text_cols[k] for k in self.text_cols],
+            *[self.text_num_cols[k] for k in self.text_num_cols],
+            *[self.num_cols[k] for k in self.num_cols],
+        ]
         if isinstance(X, pl.DataFrame):
-            all_cols = [
-                *[self.text_cols[k] for k in self.text_cols],
-                *[self.text_num_cols[k] for k in self.text_num_cols],
-                *[self.num_cols[k] for k in self.num_cols],
-            ]
             text_cols = {v: k for k, v in self.text_cols.items()}
             text_num_cols = {v: k for k, v in self.text_num_cols.items()}
             num_cols = {v: k for k, v in self.num_cols.items()}

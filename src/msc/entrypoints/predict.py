@@ -54,7 +54,7 @@ def get_average_predictions(all_predictions: list[np.ndarray]) -> list[str]:
 
 
 def predict_non_catboost(
-    model: dict, features: pl.DataFrame
+    model: dict, features: pl.DataFrame, match: np.ndarray = None
 ) -> list[np.ndarray]:
     curr_predictions = []
     for fold in model["cv"]:
@@ -91,6 +91,36 @@ def predict_catboost(model: dict, features: pl.DataFrame) -> list[np.ndarray]:
         prediction = fold["model"].predict(dat)
         curr_predictions.append(prediction.astype(str))
     return curr_predictions
+
+
+def apply_heuristics(
+    predictions_df: pl.DataFrame, heuristics_df: pl.DataFrame
+) -> pl.DataFrame:
+    feature_cols = [
+        x for x in heuristics_df.columns if x not in ["study_uid", "series_uid"]
+    ]
+    heuristics_fn = pl.when(pl.col(feature_cols[0]) == True).then(
+        pl.lit(feature_cols[0])
+    )
+    for x in feature_cols[1:]:
+        heuristics_fn = heuristics_fn.when(pl.col(x) == True).then(pl.lit(x))
+    heuristics_fn = heuristics_fn.otherwise(
+        pl.col("prediction_heuristics")
+    ).alias("prediction_heuristics")
+    predictions_df = (
+        predictions_df.join(heuristics_df, on=["study_uid", "series_uid"])
+        .with_columns(heuristics_fn)
+        .select(
+            [
+                "patient_id",
+                "study_uid",
+                "series_uid",
+                "prediction",
+                "prediction_heuristics",
+            ]
+        )
+    )
+    return predictions_df
 
 
 if __name__ == "__main__":
@@ -178,7 +208,7 @@ if __name__ == "__main__":
         if is_catboost:
             curr_predictions = predict_catboost(model, features)
         else:
-            curr_predictions = predict_non_catboost(model, features)
+            curr_predictions = predict_non_catboost(model, features, match)
         all_predictions_fold.extend(curr_predictions)
 
     if "patient_id" in features:
@@ -203,40 +233,10 @@ if __name__ == "__main__":
         # calculate heuristics
         if args.heuristics is not None:
             heuristics_df = heuristics_dict[args.heuristics](features)
-            feature_cols = [
-                x
-                for x in heuristics_df.columns
-                if x not in ["study_uid", "series_uid"]
-            ]
-            heuristics_fn = pl.when(pl.col(feature_cols[0]) == True).then(
-                pl.lit(feature_cols[0])
-            )
-            for x in feature_cols[1:]:
-                heuristics_fn = heuristics_fn.when(pl.col(x) == True).then(
-                    pl.lit(x)
-                )
-            heuristics_fn = heuristics_fn.otherwise(
-                pl.col("prediction_heuristics")
-            ).alias("prediction_heuristics")
-            predictions_df = (
-                predictions_df.join(
-                    heuristics_df, on=["study_uid", "series_uid"]
-                )
-                .with_columns(heuristics_fn)
-                .select(
-                    [
-                        "patient_id",
-                        "study_uid",
-                        "series_uid",
-                        "prediction",
-                        "prediction_heuristics",
-                    ]
-                )
-            )
-
+            heuristics_df = apply_heuristics(predictions_df, heuristics_df)
     elif task == "regression":
         # aggregate prediction average
-        consensus_pred = get_average_predictions(all_predictions_fold)
+        predictions_df = get_average_predictions(all_predictions_fold)
 
     # print predctions
     print(predictions_df.to_pandas().to_csv(index=False))

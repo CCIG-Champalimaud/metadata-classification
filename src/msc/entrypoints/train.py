@@ -16,10 +16,10 @@ from sklearn.model_selection import (
 from sklearn.feature_selection import VarianceThreshold
 from catboost import EFstrType, Pool, FeaturesData
 
-from .feature_extraction import RemoveNan, TextColsToCounts
-from .sanitization import text_sep_cols, num_sep_cols, num_cols
-from .data_loading import data_loading_wraper
-from .train_utils import model_dict
+from ..feature_extraction import RemoveNan, TextColsToCounts
+from ..sanitization import text_sep_cols, num_sep_cols, num_cols
+from ..data_loading import data_loading_wraper
+from ..train_utils import model_dict
 
 N_ITER = 50
 
