@@ -53,6 +53,46 @@ def get_average_predictions(all_predictions: list[np.ndarray]) -> list[str]:
     return consensus_pred
 
 
+def predict_non_catboost(
+    model: dict, features: pl.DataFrame
+) -> list[np.ndarray]:
+    curr_predictions = []
+    for fold in model["cv"]:
+        count_vec: TextColsToCounts = fold["count_vec"]
+        count_vec.cols_to_drop = ["series_uid", "study_uid"]
+        transformed_features = count_vec.transform(features)
+        prediction = fold["model"].predict(transformed_features)
+        if match is not None:
+            curr_predictions.append(
+                np.char.upper(match[prediction.astype(np.int32)])[:, None]
+            )
+        else:
+            curr_predictions.append(prediction.astype(str)[:, None])
+    return curr_predictions
+
+
+def predict_catboost(model: dict, features: pl.DataFrame) -> list[np.ndarray]:
+    fc = text_sep_cols + num_sep_cols
+    curr_predictions = []
+    for fold in model["cv"]:
+        text_arr = []
+        num_arr = []
+        for f in fold["feature_names"]:
+            if f in fc:
+                text_arr.append(features[f].to_numpy())
+            elif f in num_cols:
+                num_arr.append(features[f].to_numpy())
+        text_arr = np.array(text_arr).T
+        num_arr = np.array(num_arr).T
+        dat = FeaturesData(
+            num_feature_data=num_arr.astype(np.float32),
+            cat_feature_data=text_arr,
+        )
+        prediction = fold["model"].predict(dat)
+        curr_predictions.append(prediction.astype(str))
+    return curr_predictions
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Predicts the type of sequence."
@@ -134,39 +174,12 @@ if __name__ == "__main__":
     for model_path in args.model_paths:
         model = dill.load(open(model_path, "rb"))
         task = model["args"].get("task_name", "classification")
-        for fold in model["cv"]:
-            if fold["count_vec"] is not None:
-                is_catboost = False
-                count_vec: TextColsToCounts = fold["count_vec"]
-                count_vec.cols_to_drop = ["series_uid", "study_uid"]
-                transformed_features = count_vec.transform(features)
-                prediction = fold["model"].predict(transformed_features)
-                if match is not None:
-                    all_predictions_fold.append(
-                        np.char.upper(match[prediction.astype(np.int32)])[
-                            :, None
-                        ]
-                    )
-                else:
-                    all_predictions_fold.append(prediction.astype(str)[:, None])
-            else:
-                is_catboost = True
-                fc = text_sep_cols + num_sep_cols
-                text_arr = []
-                num_arr = []
-                for f in fold["feature_names"]:
-                    if f in fc:
-                        text_arr.append(features[f].to_numpy())
-                    elif f in num_cols:
-                        num_arr.append(features[f].to_numpy())
-                text_arr = np.array(text_arr).T
-                num_arr = np.array(num_arr).T
-                dat = FeaturesData(
-                    num_feature_data=num_arr.astype(np.float32),
-                    cat_feature_data=text_arr,
-                )
-                prediction = fold["model"].predict(dat)
-                all_predictions_fold.append(prediction.astype(str))
+        is_catboost = model["args"].get("model_name") == "catboost"
+        if is_catboost:
+            curr_predictions = predict_catboost(model, features)
+        else:
+            curr_predictions = predict_non_catboost(model, features)
+        all_predictions_fold.extend(curr_predictions)
 
     if "patient_id" in features:
         patient_id = features["patient_id"]

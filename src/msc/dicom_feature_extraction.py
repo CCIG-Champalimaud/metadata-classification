@@ -123,10 +123,10 @@ image_feature_keys = [
     "image_moment_4",
     "image_moment_5",
     "image_moment_6",
-    "image_intertia_tensor_eigval_0",
-    "image_intertia_tensor_eigval_1",
-    "image_intertia_tensor_eigval_2",
-    "image_intertia_tensor_eigval_3",
+    "image_inertia_tensor_eigval_0",
+    "image_inertia_tensor_eigval_1",
+    "image_inertia_tensor_eigval_2",
+    "image_inertia_tensor_eigval_3",
 ]
 
 converted_dicom_header_dict = {
@@ -282,7 +282,7 @@ def extract_features_from_dicom(
     """
     file_paths = glob(os.path.join(path, "*dcm"))
     n_images = len(file_paths)
-    output_dict = {"number_of_images": n_images}
+    output_dict = {}
     for file in file_paths:
         try:
             dicom_file = dcmread(file, stop_before_pixels=not image_features)
@@ -300,6 +300,7 @@ def extract_features_from_dicom(
                 output_dict[k] = []
             output_dict[k].append(features[k])
 
+    output_dict["number_of_images"] = [n_images for _ in output_dict[k]]
     if join is True:
         for k in output_dict:
             if (

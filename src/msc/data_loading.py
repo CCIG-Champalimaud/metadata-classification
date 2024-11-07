@@ -13,16 +13,22 @@ from .constants import cols_to_drop
 
 
 def read_data_dicom_dataset(
-    input_path: str, dicom_recursion: int, n_workers: int = 0
-):
-    all_series_paths = glob(
-        os.sep.join(
-            [
-                input_path.rstrip("/"),
-                *["*" for _ in range(dicom_recursion)],
-            ]
+    input_paths: list[str] | str, dicom_recursion: int, n_workers: int = 0
+) -> pl.DataFrame:
+    if isinstance(input_paths, str):
+        input_paths = [input_paths]
+    all_series_paths = []
+    for input_path in input_paths:
+        all_series_paths.extend(
+            glob(
+                os.sep.join(
+                    [
+                        input_path.rstrip("/"),
+                        *["*" for _ in range(dicom_recursion)],
+                    ]
+                )
+            )
         )
-    )
     n = len(all_series_paths)
     features = {}
     if n_workers > 0:
@@ -34,7 +40,7 @@ def read_data_dicom_dataset(
                 for k in f:
                     if k not in features:
                         features[k] = []
-                    features[k].append(f[k])
+                    features[k].extend(f[k])
     else:
         for f in tqdm(
             map(extract_features_from_dicom, all_series_paths), total=n
@@ -42,8 +48,8 @@ def read_data_dicom_dataset(
             for k in f:
                 if k not in features:
                     features[k] = []
-                features[k].append(f[k])
-    features = pl.from_dict({k: features[k][0] for k in features})
+                features[k].extend(f[k])
+    features = pl.from_dict({k: features[k] for k in features})
     return features
 
 
@@ -201,30 +207,55 @@ def read_data(
     """
 
     all_features = []
+    reading_operators = {
+        "dicom_dataset": [],
+        "dicom": [],
+        "csv_tsv": [],
+        "parquet": [],
+        "json": [],
+    }
     if isinstance(input_paths, str):
         input_paths = [input_paths]
     for input_path in input_paths:
         extension = input_path.split(".")[-1]
         if os.path.isdir(input_path) == True:
-            # load dicom metadata
             if dicom_recursion > 0:
-                all_features.append(
-                    read_data_dicom_dataset(
-                        input_path, dicom_recursion, n_workers
-                    )
-                )
+                reading_operators["dicom_dataset"].append(input_path)
             else:
-                all_features.append(read_data_dicom(input_path))
+                reading_operators["dicom"].append(input_path)
         elif extension in ["tsv", "csv"]:
-            all_features.append(read_data_csv_tsv(input_path))
+            reading_operators["csv_tsv"].append(input_path)
         elif extension == "parquet":
-            all_features.append(read_parquet(input_path))
+            reading_operators["parquet"].append(input_path)
         elif extension == "json":
-            all_features.append(read_json(input_path))
+            reading_operators["json"].append(input_path)
         else:
             raise NotImplementedError(
                 "Input must be DICOM series dir or csv, tsv or parquet file"
             )
+
+    for reading_op in reading_operators:
+        if len(reading_operators[reading_op]) > 0:
+            if reading_op == "dicom_dataset":
+                all_features.append(
+                    read_data_dicom_dataset(
+                        reading_operators[reading_op],
+                        dicom_recursion,
+                        n_workers,
+                    )
+                )
+            elif reading_op == "dicom":
+                for path in reading_operators[reading_op]:
+                    all_features.append(read_data_dicom(path))
+            elif reading_op == "csv_tsv":
+                for path in reading_operators[reading_op]:
+                    all_features.append(read_data_csv_tsv(path))
+            elif reading_op == "parquet":
+                for path in reading_operators[reading_op]:
+                    all_features.append(read_parquet(path))
+            elif reading_op == "json":
+                for path in reading_operators[reading_op]:
+                    all_features.append(read_json(path))
 
     if len(all_features) > 1:
         all_features = pl.concat(all_features, how="vertical")
