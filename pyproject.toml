@@ -3,7 +3,7 @@ requires = ["pdm-backend"]
 build-backend = "pdm.backend"
 
 [project]
-name = "metadata-sequence-classification"
+name = "msc"
 version = "0.1.0"
 description = "Toolbox for automatic DICOM metadata extraction and classification/regression."
 readme = "README.md"
