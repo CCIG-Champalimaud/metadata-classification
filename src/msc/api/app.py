@@ -5,7 +5,7 @@ import dill
 import numpy as np
 import polars as pl
 from dataclasses import dataclass
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 from ..data_loading import read_data, summarise_columns
@@ -17,14 +17,33 @@ from ..entrypoints.predict import (
     apply_heuristics,
 )
 from ..heuristics import heuristics_dict
-from ..orthanc_utilities import OrthancHelper
-
-ORTHANC_URL = os.environ.get("ORTHANC_URL", "http://localhost:8042")
-
-orthanc_helper = OrthancHelper(ORTHANC_URL)
+from .utils import DicomWebHelper, OrthancHelper
 
 with open("config-api.yaml", "r") as o:
     configuration = yaml.safe_load(o)
+
+ORTHANC_URL = os.environ.get("ORTHANC_URL", None)
+ORTHANC_USER = os.environ.get("ORTHANC_USER", None)
+ORTHANC_PASSWORD = os.environ.get("ORTHANC_PASSWORD", None)
+DICOMWEB_URL = os.environ.get("DICOMWEB_URL", None)
+DICOMWEB_USER = os.environ.get("DICOMWEB_USER", None)
+DICOMWEB_PASSWORD = os.environ.get("DICOMWEB_PASSWORD", None)
+
+if all([ORTHANC_URL is not None]):
+    orthanc_helper = OrthancHelper(
+        url=ORTHANC_URL, user=ORTHANC_USER, password=ORTHANC_PASSWORD
+    )
+else:
+    orthanc_helper = None
+
+if all([DICOMWEB_URL is not None]):
+    dicomweb_helper = DicomWebHelper(
+        user=DICOMWEB_USER,
+        password=DICOMWEB_PASSWORD,
+        url=DICOMWEB_URL,
+    )
+else:
+    dicomweb_helper = None
 
 app = FastAPI()
 
@@ -41,6 +60,16 @@ class PredictionRequest(BaseModel):
 class OrthancPredictionRequest(BaseModel):
     """
     Request body for the Orthanc prediction API.
+    """
+
+    model_id: str
+    study_uid: str
+    update_labels: bool = False
+
+
+class DICOMWebPredictionRequest(BaseModel):
+    """
+    Request body for the DICOM-web prediction API.
     """
 
     model_id: str
@@ -138,6 +167,11 @@ class ModelServer:
         """
         Predict the types of sequences in an Orthanc study.
         """
+        if orthanc_helper is None:
+            raise HTTPException(
+                status_code=400,
+                detail="ORTHANC_URL, ORTHANC_USER and ORTHANC_PASSWORD should be defined.",
+            )
         start_time = time.time()
         features = orthanc_helper.get_study_features(
             prediction_request.study_uid
@@ -148,23 +182,62 @@ class ModelServer:
         )
         end_time = time.time()
         prediction["time"] = end_time - start_time
-        for series_uid, pred in zip(
-            prediction["series_uid"], prediction["prediction_heuristics"]
-        ):
-            orthanc_helper.put_label("series", series_uid, pred)
-        orthanc_helper.put_label(
-            "studies",
-            prediction_request.study_uid,
-            f"Model_{prediction_request.model_id}",
+        if prediction_request.update_labels:
+            for series_uid, pred in zip(
+                prediction["series_uid"], prediction["prediction_heuristics"]
+            ):
+                orthanc_helper.put_label("series", series_uid, pred)
+            orthanc_helper.put_label(
+                "studies",
+                prediction_request.study_uid,
+                f"Model_{prediction_request.model_id}",
+            )
+        return prediction
+
+    def predict_dicomweb_api(
+        self, prediction_request: DICOMWebPredictionRequest
+    ):
+        """
+        Predict the types of sequences in an Orthanc study.
+        """
+        if dicomweb_helper is None:
+            raise HTTPException(
+                status_code=400,
+                detail="DICOMWEB_URL, DICOMWEB_USER and DICOMWEB_PASSWORD should be defined.",
+            )
+        start_time = time.time()
+        features = dicomweb_helper.get_study_features(
+            prediction_request.study_uid
         )
+        features = summarise_columns(features)
+        prediction = self.predict_from_features(
+            prediction_request.model_id, features
+        )
+        end_time = time.time()
+        prediction["time"] = end_time - start_time
         return prediction
 
 
+api_model_dict = {}
+api_match_dict = {}
+api_heuristics_dict = {}
+api_filter_dict = {}
+for model in configuration["models"]:
+    api_model_dict[model] = configuration["models"][model]["path"]
+    if "matches" in configuration["models"][model]:
+        api_match_dict[model] = configuration["models"][model]["matches"]
+    if "heuristics" in configuration["models"][model]:
+        api_heuristics_dict[model] = configuration["models"][model][
+            "heuristics"
+        ]
+    if "filters" in configuration["models"][model]:
+        api_filter_dict[model] = configuration["models"][model]["filters"]
+
 model_server = ModelServer(
-    model_dict=configuration["model_dict"],
-    matches=configuration.get("matches"),
-    heuristics=configuration.get("heuristics"),
-    filters=configuration.get("filters"),
+    model_dict=api_model_dict,
+    matches=api_match_dict,
+    heuristics=api_heuristics_dict,
+    filters=api_filter_dict,
 )
 
 app.add_api_route(
@@ -174,5 +247,11 @@ app.add_api_route(
 app.add_api_route(
     "/predict-orthanc",
     endpoint=model_server.predict_orthanc_api,
+    methods=["POST"],
+)
+
+app.add_api_route(
+    "/predict-dicomweb",
+    endpoint=model_server.predict_dicomweb_api,
     methods=["POST"],
 )

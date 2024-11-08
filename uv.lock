@@ -644,7 +644,7 @@ wheels = [
 ]
 
 [[package]]
-name = "metadata-sequence-classification"
+name = "msc"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

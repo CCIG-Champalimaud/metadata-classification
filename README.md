@@ -67,29 +67,45 @@ The input path (`<PATH TO DICOM DIRECTORY>`) can be:
 
 To perform model serving with a dedicated API, we use FastAPI. So running this is as simple as running `fastapi run src/msc/api/app.py` (or `fastapi dev src/msc/api/app.py` for development). Inferences are supported for:
 
-* **Standard queries:** a post request to `http://localhost:8000/predict` with a JSON body with the following keys:
+* **Standard queries**: a post request to `http://localhost:8000/predict` with a JSON body with the following keys:
     * `dicom_path`: the path to the DICOM directory (will recursively fetch all DICOM series)
     * `model_id`: the name of the model to use (see below how this is configured)
-* **Orthanc queries:** a post request to `http://localhost:8000/predict_orthanc` with a JSON body with the following keys (this does not support image features):
+* **Orthanc queries**: a post request to `http://localhost:8000/predict-orthanc` with a JSON body with the following keys (this does not support image features):
     * `study_uid`: study UID in Orthanc
     * `model_id`: the name of the model to use (see below how this is configured)
+* **DICOM-web queries**: a post request to `http://localhost:8000/predict-dicomweb` with a JSON body with the following keys (this does not support image features):
+    * `study_uid`: study UID in DICOM-web
+    * `model_id`: the name of the model to use (see below how this is configured)
 
-The configuration for the API is available in `config-api.yaml` and `src/msc/api/app.py` automatically fetches this file. Currently, this makes use of four possible values:
+#### Configuration
+
+The configuration for the API is available in `config-api.yaml` and `src/msc/api/app.py` automatically fetches this file. Currently, this makes use of four possible values for each model (specified under a `models` key):
 
 * `model_dict`: a dictionary with keys being the names of the models and values being the paths to the models
 * `matches`: a dictionary with keys being the names of the models and values being the list of sequence types the model can predict (this is only used when the model is not a CatBoost model)
 * `heuristics`: a dictionary with keys being the names of the models and values being the heuristics used to determine the sequence type. Heuristics are defined in `src/msc/heuristics.py`
 * `filters`: a dictionary with keys being the names of the models and values being a dictionary with keys being the DICOM tags and values being a list of values. These are used to filter the DICOM series before prediction and only works when using the Orthanc prediction API.
 
+Example of `config-api.yaml`: 
+
 ```
-model_dict:
-  prostate_mpmri: "/storage/models/metadata/models/xgb.standard.100.pkl"
-matches:
-  prostate_mpmri: ["ADC", "DCE", "DWI", "Others", "T2W"]
-heuristics:
-  prostate_mpmri: "prostate_mpmri"
-filters:
+models:
   prostate_mpmri:
-    BodyPartExamined: ["PROSTATE", "PELVIS", "GENITOURINARY SYSTEM"]
-    Modality: ["MR"]
+    model: "/storage/models/metadata/models/xgb.standard.100.pkl"
+    matches: ["ADC", "DCE", "DWI", "Others", "T2W"]
+    heuristics: "prostate_mpmri"
+    filters:
+      BodyPartExamined: ["PROSTATE", "PELVIS", "GENITOURINARY SYSTEM"]
+      Modality: ["MR"]
 ```
+
+#### Defining URLs and users for Orthanc and DICOM-web
+
+The following environment variables are used to define the URLs and users for Orthanc and DICOM-web:
+
+* `ORTHANC_URL`: the URL of the Orthanc server
+* `ORTHANC_USER`: the username for the Orthanc server
+* `ORTHANC_PASSWORD`: the password for the Orthanc server
+* `DICOMWEB_URL`: the URL of the DICOM-web server
+* `DICOMWEB_USER`: the username for the DICOM-web server
+* `DICOMWEB_PASSWORD`: the password for the DICOM-web server
