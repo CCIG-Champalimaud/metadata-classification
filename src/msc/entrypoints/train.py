@@ -65,7 +65,7 @@ def read_params(expr_list: list[str]) -> dict:
     return params
 
 
-if __name__ == "__main__":
+def main():
     parser = argparse.ArgumentParser(description="Cross validates models.")
 
     parser.add_argument(
@@ -474,3 +474,7 @@ if __name__ == "__main__":
 
     with open(args.output_path, "wb") as f:
         dill.dump(train_results, f)
+
+
+if __name__ == "__main__":
+    main()

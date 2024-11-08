@@ -285,6 +285,7 @@ def extract_features_from_dicom(
     file_paths = glob(os.path.join(path, "*dcm"))
     n_images = len(file_paths)
     output_dict = {}
+    N = 0
     for file in file_paths:
         try:
             dicom_file = dcmread(file, stop_before_pixels=not image_features)
@@ -295,14 +296,19 @@ def extract_features_from_dicom(
         if features is None:
             continue
         if image_features is True and (0x7FE0, 0x0010) in dicom_file:
-            features.update(extract_pixel_features(dicom_file))
+            try:
+                features.update(extract_pixel_features(dicom_file))
+            except ValueError:
+                # can happen if incomplete pixel array is present
+                continue
 
         for k in features:
             if k not in output_dict:
                 output_dict[k] = []
             output_dict[k].append(features[k])
+        N += 1
 
-    output_dict["number_of_images"] = [n_images for _ in output_dict[k]]
+    output_dict["number_of_images"] = [n_images for _ in range(N)]
     if join is True:
         for k in output_dict:
             if (

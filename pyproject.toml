@@ -1,3 +1,7 @@
+[build-system]
+requires = ["pdm-backend"]
+build-backend = "pdm.backend"
+
 [project]
 name = "metadata-sequence-classification"
 version = "0.1.0"
@@ -22,3 +26,8 @@ dependencies = [
     "tqdm>=4.66.6",
     "xgboost>=1.6.2",
 ]
+
+[project.scripts]
+msc_train = "msc.entrypoints.train:main"
+msc_predict = "msc.entrypoints.predict:main"
+msc_feature_extraction = "msc.entrypoints.get_feature_parquet:main"

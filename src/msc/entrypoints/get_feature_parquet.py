@@ -34,10 +34,9 @@ class DICOMFeatureExtraction:
             return None
 
 
-if __name__ == "__main__":
+def main():
     parser = argparse.ArgumentParser(
-        "Extracts the metadata of a directory containing DICOM series and \
-            prints the data in JSON format."
+        "Extracts the metadata of a directory containing DICOM series and prints the data in JSON format."
     )
 
     parser.add_argument("--input_dir", required=True, nargs="+")
@@ -77,3 +76,7 @@ if __name__ == "__main__":
                         output.append(f)
 
     pl.DataFrame(output).write_parquet(args.output_path)
+
+
+if __name__ == "__main__":
+    main()

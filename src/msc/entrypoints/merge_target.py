@@ -1,4 +1,4 @@
-from src.msc.data_loading import read_data
+from ..data_loading import read_data
 
 if __name__ == "__main__":
     import argparse

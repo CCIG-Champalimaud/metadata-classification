@@ -13,6 +13,8 @@ class SpaceSepNumColsToMatrix(BaseEstimator, TransformerMixin):
     be summarised using relatively simple features).
     """
 
+    split_char: str = " "
+
     def __init__(self, standard=False, default_value=-1, split_char: str = " "):
         """
         Args:

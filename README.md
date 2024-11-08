@@ -29,7 +29,7 @@ The Python code presented here concerns, loosely, feature extraction, model trai
 
 *In `src/msc/get_feature_parquet.py`*
 
-The extraction of metadata values from each DICOM series, which can be run as a command line utility - `python -m src.msc.entrypoints.get_feature_parquet --input_dir <PATH TO DICOM DATASET> --pattern '*dcm' --n_workers 8 --output_path <OUTPUT PATH>` - producing a parquet file with all the metadata values for each DICOM series. It is possible to extract two feature types and these are specified using `--feature_types`:
+The extraction of metadata values from each DICOM series, which can be run as a command line utility - `msc_feature_extraction --input_dir <PATH TO DICOM DATASET> --pattern '*dcm' --n_workers 8 --output_path <OUTPUT PATH>` - producing a parquet file with all the metadata values for each DICOM series. It is possible to extract two feature types and these are specified using `--feature_types`:
 
 * `metadata`: extracts standard DICOM metadata values
 * `image` extracts features retrieved from the pixel array of each individual series
@@ -38,7 +38,7 @@ The extraction of metadata values from each DICOM series, which can be run as a 
 
 *In `src/msc/entrypoints/train.py`*
 
-This is also a CLI (`python -m src.msc.entrypoints.train`) whose details are available with the `--help` flag. **Training requires as input a CSV, TSV or parquet file with all the tags produced by `src/msc/get_feature_parquet.py`.** Inspection of this code will reveal that there are several different possible models. A more practical example of training is available in the snakemake pipeline `train_all_models.smk`.
+This is also a CLI (`msc_train`) whose details are available with the `--help` flag. **Training requires as input a CSV, TSV or parquet file with all the tags produced by `msc_feature_extraction`.** Inspection of this code will reveal that there are several different possible models. A more practical example of training is available in the snakemake pipeline `train_all_models.smk`.
 
 ### Inference
 
@@ -48,7 +48,7 @@ This is what end users should focus on using - we have made it as simple as poss
 
 ```bash
 MODEL_PATH=models/catboost.percent_phase_field_of_view:sar:series_description.pkl
-python src.msc.entrypoints.predict \
+python msc_predict \
     --input_path <PATH TO DICOM DIRECTORY> \
     --model_path $MODEL_PATH
 ```

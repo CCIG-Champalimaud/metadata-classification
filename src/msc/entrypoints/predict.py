@@ -1,5 +1,6 @@
 import argparse
 import dill
+import joblib
 import numpy as np
 import polars as pl
 from scipy.stats import mode
@@ -123,7 +124,7 @@ def apply_heuristics(
     return predictions_df
 
 
-if __name__ == "__main__":
+def main():
     parser = argparse.ArgumentParser(
         description="Predicts the type of sequence."
     )
@@ -188,21 +189,18 @@ if __name__ == "__main__":
     features = features.sort(by=["study_uid", "series_uid"])
 
     # setup models
-    all_predictions = []
     match = None
     if args.classes is not None:
         match = np.array(args.classes, dtype=str)
     all_predictions_fold = []
-    all_series_uid = features["series_uid"]
-    all_study_uid = features["study_uid"]
-    if "patient_id" in features:
-        all_patient_id = features["patient_id"]
-    else:
-        all_patient_id = features["study_uid"]
 
     # predict
     for model_path in args.model_paths:
-        model = dill.load(open(model_path, "rb"))
+        model_extension = model_path.split(".")[-1]
+        if model_extension == "joblib":
+            model = joblib.load(model_path)
+        else:
+            model = dill.load(open(model_path, "rb"))
         task = model["args"].get("task_name", "classification")
         is_catboost = model["args"].get("model_name") == "catboost"
         if is_catboost:
@@ -240,3 +238,7 @@ if __name__ == "__main__":
 
     # print predctions
     print(predictions_df.to_pandas().to_csv(index=False))
+
+
+if __name__ == "__main__":
+    main()
