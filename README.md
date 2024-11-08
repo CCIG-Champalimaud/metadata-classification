@@ -14,8 +14,10 @@ Sometimes, large collections of mpMRI studies have no annotations regarding the 
 
 To manage dependencies we use `micromamba` and `uv`, a Python package manager. To install `uv` and all the dependencies, run:
 
-1. `micromamba install python=$(cat .python-version) uv -c conda-forge -y`
-2. `uv pip install -r pyproject.toml`
+1. `micromamba create -n dicom-classification`
+2. `micromamba activate dicom-classification`
+3. `micromamba install python=$(cat .python-version) uv -c conda-forge -y`
+4. `uv pip install -r pyproject.toml`
 
 And you should be all set!
 
