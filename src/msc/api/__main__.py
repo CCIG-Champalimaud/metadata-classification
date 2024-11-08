@@ -1,8 +1,9 @@
-import dill
+import os
+import time as time
 import yaml
+import dill
 import numpy as np
 import polars as pl
-import time as time
 from dataclasses import dataclass
 from fastapi import FastAPI
 from pydantic import BaseModel
@@ -16,7 +17,11 @@ from ..entrypoints.predict import (
     apply_heuristics,
 )
 from ..heuristics import heuristics_dict
-from ..orthanc_utilities import get_study_features
+from ..orthanc_utilities import OrthancHelper
+
+ORTHANC_URL = os.environ.get("ORTHANC_URL", "http://localhost:8042")
+
+orthanc_helper = OrthancHelper(ORTHANC_URL)
 
 with open("config-api.yaml", "r") as o:
     configuration = yaml.safe_load(o)
@@ -134,13 +139,24 @@ class ModelServer:
         Predict the types of sequences in an Orthanc study.
         """
         start_time = time.time()
-        features = get_study_features(prediction_request.study_uid)
+        features = orthanc_helper.get_study_features(
+            prediction_request.study_uid
+        )
         features = summarise_columns(features)
         prediction = self.predict_from_features(
             prediction_request.model_id, features
         )
         end_time = time.time()
         prediction["time"] = end_time - start_time
+        for series_uid, pred in zip(
+            prediction["series_uid"], prediction["prediction_heuristics"]
+        ):
+            orthanc_helper.put_label("series", series_uid, pred)
+        orthanc_helper.put_label(
+            "studies",
+            prediction_request.study_uid,
+            f"Model_{prediction_request.model_id}",
+        )
         return prediction
 
 
