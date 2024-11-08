@@ -10,9 +10,14 @@ Sometimes, large collections of mpMRI studies have no annotations regarding the 
 * Dynamic contrast enhancement (DCE)
 * Other sequence types (others)
 
-## Conda environments
+## Environments
 
-Conda environments are provided for both training and inference (`environment-docker.yaml` and `environment-docker-prediction-catboost.yaml`, respectively). We use micromamba as it is typically faster but whichever one the enduser prefers is fine.
+To manage dependencies we use `micromamba` and `uv`, a Python package manager. To install `uv` and all the dependencies, run:
+
+1. `micromamba install python=$(cat .python-version) uv -c conda-forge -y`
+2. `uv pip install -r pyproject.toml`
+
+And you should be all set!
 
 ## Code details
 
