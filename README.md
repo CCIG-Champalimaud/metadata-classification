@@ -83,7 +83,7 @@ The configuration for the API is available in `config-api.yaml` and `src/msc/api
 
 * `model_dict`: a dictionary with keys being the names of the models and values being the paths to the models
 * `matches`: a dictionary with keys being the names of the models and values being the list of sequence types the model can predict (this is only used when the model is not a CatBoost model)
-* `heuristics`: a dictionary with keys being the names of the models and values being the heuristics used to determine the sequence type. Heuristics are defined in `src/msc/heuristics.py`
+* `heuristics`: a dictionary with keys being the names of the models and values being the heuristics used to determine the sequence type. Heuristics are defined in `src/msc/heuristics.py` (more information below)
 * `filters`: a dictionary with keys being the names of the models and values being a dictionary with keys being the DICOM tags and values being a list of values. These are used to filter the DICOM series before prediction and only works when using the Orthanc prediction API.
 
 Example of `config-api.yaml`: 
@@ -109,3 +109,11 @@ The following environment variables are used to define the URLs and users for Or
 * `DICOMWEB_URL`: the URL of the DICOM-web server
 * `DICOMWEB_USER`: the username for the DICOM-web server
 * `DICOMWEB_PASSWORD`: the password for the DICOM-web server
+
+We recommend having a file (i.e. `.env`) which is sourced with these constants prior to API utilization as it greatly simplifies this process.
+
+While we considered including the Orthanc and DICOM-web credentials in the configuration file, we decided against this as it would make it easier to leak the credentials (and this allows easier deployment through Docker/Docker-compose/Kubernetes/etc through the definition of environment variables in the manifest files).
+
+#### Heuristics
+
+By heuristics, we mean a set of hard-coded rules that are used to determine the sequence type of a DICOM series. These are defined in `src/msc/heuristics.py` and are used to determine the sequence type of a DICOM series and override the prediction. The output of each heuristic should be a `polars` dataframe with a `study_uid` column, a `series_uid` column and a set of columns with names equal to the possible classifications. If the heuristics column for a given class is True, this class overrides the prediction. Please note that the last heuristic in the list overrides the formers, so the order of the heuristics is important.
