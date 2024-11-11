@@ -1,11 +1,15 @@
 import os
+import re
 import json
+import numpy as np
 import polars as pl
 from glob import glob
 from multiprocessing import Pool
+from difflib import SequenceMatcher
 from tqdm import tqdm
 from .dicom_feature_extraction import (
     extract_features_from_dicom,
+    dicom_header_dict,
     image_feature_keys,
 )
 from .sanitization import sanitize_data
@@ -173,12 +177,60 @@ def summarise_columns(
     return output
 
 
+def camel_case_to_snake_case(name: str) -> str:
+    """
+    Converts a camel case string to snake case.
+
+    Args:
+        name (str): camel case string.
+
+    Returns:
+        str: snake case string.
+    """
+    return re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
+
+
+def auto_match_columns(data: pl.DataFrame) -> pl.DataFrame:
+    """
+    Matches columns in a dataframe to a reference dataframe.
+
+    Args:
+        data (pl.DataFrame): dataframe to match columns to.
+
+    Returns:
+        pl.DataFrame: dataframe with matched columns.
+    """
+
+    def preproc_value(value: str) -> str:
+        for sub_str in [" ", ".", "-"]:
+            value = value.replace(sub_str, "_")
+        return camel_case_to_snake_case(value)
+
+    columns = data.columns
+    dicom_header_names = list(dicom_header_dict.keys())
+    rename_dict = {}
+    no_good_match = []
+    for c1 in dicom_header_names:
+        current = {}
+        for c2 in columns:
+            current[c2] = SequenceMatcher(None, c1, preproc_value(c2)).ratio()
+        best_match = sorted(current.items(), key=lambda x: x[1], reverse=True)[
+            0
+        ]
+        if best_match[0] > 0.8:
+            rename_dict[c2] = best_match[1]
+        else:
+            no_good_match.append(c1)
+    return rename_dict, no_good_match
+
+
 def read_data(
     input_paths: list[str] | str,
     dicom_recursion: int = 0,
     n_workers: int = 0,
     group_cols: list[str] | None = ["study_uid", "series_uid", "patient_id"],
     feature_column_mapping: dict | None = None,
+    auto_match: bool = False,
 ) -> pl.DataFrame:
     """
     Reads data which can be in multiple formats. The supported data formats are:
@@ -211,6 +263,8 @@ def read_data(
             "patient_id"].
         feature_column_mapping (dict | None, optional): mapping of old-to-new
             column names. Defaults to None (no conversion).
+        auto_match (bool, optional): whether to automatically match columns.
+            Defaults to False.
 
     Returns:
         pl.DataFrame: DICOM feature dataframe.
@@ -275,6 +329,12 @@ def read_data(
         mapping = [x.split(":") for x in feature_column_mapping]
         mapping = {x[0]: x[1] for x in mapping}
         all_features = all_features.rename(mapping)
+    if auto_match is True:
+        mapping, no_good_match = auto_match_columns(all_features)
+        if len(no_good_match) > 0:
+            raise ValueError(
+                f"Could not match columns with auto_match: {no_good_match}"
+            )
     if group_cols is not None:
         all_features = summarise_columns(all_features, group_cols)
     return all_features
