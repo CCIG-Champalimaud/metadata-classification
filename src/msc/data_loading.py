@@ -1,7 +1,6 @@
 import os
 import re
 import json
-import numpy as np
 import polars as pl
 from glob import glob
 from multiprocessing import Pool
