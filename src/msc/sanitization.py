@@ -39,6 +39,8 @@ def sanitize_data(data: pl.DataFrame) -> pl.DataFrame:
     all_cols = list(set([*text_sep_cols, *num_sep_cols, *replace_cols]))
     col_expressions = []
     for col in all_cols:
+        if col not in data:
+            continue
         pl_col = pl.col(col)
         if col in text_sep_cols or col in num_sep_cols:
             for k in rep_dict:

@@ -62,7 +62,12 @@ def read_data_dicom(input_path: str):
 
 def read_data_csv_tsv(input_path: str):
     sep = "\t" if input_path[-3:] == "tsv" else ","
-    features = pl.read_csv(input_path, separator=sep, ignore_errors=True)
+    features = pl.read_csv(
+        input_path,
+        separator=sep,
+        ignore_errors=True,
+        truncate_ragged_lines=True,
+    )
     features.columns = [x.replace(" ", "_") for x in features.columns]
     return features
 
@@ -119,6 +124,8 @@ def summarise_columns(
         pl.DataFrame: summarised column.
     """
     cols = x.columns
+    print(group_cols)
+    print(cols)
     group_cols = [x for x in group_cols if x in cols]
     if len(group_cols) == 0:
         raise ValueError("No column in group_cols was present in x")
@@ -171,6 +178,7 @@ def read_data(
     dicom_recursion: int = 0,
     n_workers: int = 0,
     group_cols: list[str] | None = ["study_uid", "series_uid", "patient_id"],
+    feature_column_mapping: dict | None = None,
 ) -> pl.DataFrame:
     """
     Reads data which can be in multiple formats. The supported data formats are:
@@ -201,6 +209,8 @@ def read_data(
         group_cols (list[str] | None, optional): columns to use as groups when
             summarising columns. Defaults to ["study_uid", "series_uid",
             "patient_id"].
+        feature_column_mapping (dict | None, optional): mapping of old-to-new
+            column names. Defaults to None (no conversion).
 
     Returns:
         pl.DataFrame: DICOM feature dataframe.
@@ -261,6 +271,10 @@ def read_data(
         all_features = pl.concat(all_features, how="vertical")
     else:
         all_features = all_features[0]
+    if feature_column_mapping is not None:
+        mapping = [x.split(":") for x in feature_column_mapping]
+        mapping = {x[0]: x[1] for x in mapping}
+        all_features = all_features.rename(mapping)
     if group_cols is not None:
         all_features = summarise_columns(all_features, group_cols)
     return all_features

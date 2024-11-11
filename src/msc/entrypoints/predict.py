@@ -170,6 +170,13 @@ def main():
         default=0,
         help="Number of workers when dicom_recursion > 0",
     )
+    parser.add_argument(
+        "--feature_column_mapping",
+        type=str,
+        default=None,
+        nargs="+",
+        help="List of input_path_names:model_name pairs for the data",
+    )
 
     args = parser.parse_args()
 
@@ -184,6 +191,7 @@ def main():
         dicom_recursion=args.dicom_recursion,
         n_workers=args.n_workers,
         group_cols=group_cols,
+        feature_column_mapping=args.feature_column_mapping,
     )
     features = sanitize_data(features)
     features = features.sort(by=["study_uid", "series_uid"])
