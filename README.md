@@ -41,6 +41,9 @@ If you want to serve `catboost`, `lightgbm` or `xgboost` models, you need to add
 
 If you want to extract pixel features you need to add `--extra pixel` to `uv sync`.
 
+### Package building
+
+You can also build the package using `uv` using `uv build`.
 
 ## Code details
 
