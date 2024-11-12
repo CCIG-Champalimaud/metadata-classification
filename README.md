@@ -18,6 +18,7 @@ To manage dependencies we use `micromamba` and `uv`, a Python package manager. T
 2. `micromamba activate dicom-classification`
 3. `micromamba install python=$(cat .python-version) uv -c conda-forge -y`
 4. `uv sync`
+5. `uv pip install -r pyproject.toml`
 
 And you should be all set!
 
