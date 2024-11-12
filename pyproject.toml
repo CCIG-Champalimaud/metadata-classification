@@ -9,9 +9,7 @@ description = "Toolbox for automatic DICOM metadata extraction and classificatio
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "catboost>=1.1",
     "dill>=0.3.5.1",
-    "fastapi[standard]>=0.115.4",
     "fasttreeshap>=0.1.6",
     "numpy>=1.23.4",
     "pandas>=2.2.3",
@@ -20,14 +18,39 @@ dependencies = [
     "pydantic>=2.9.2",
     "pydicom>=2.3.0",
     "requests>=2.32.3",
-    "scikit-image>=0.24.0",
     "scikit-learn==1.4.1.post1",
     "scipy>=1.9.2",
     "tqdm>=4.66.6",
-    "xgboost>=1.6.2",
 ]
 
 [project.scripts]
 msc_train = "msc.entrypoints.train:main"
 msc_predict = "msc.entrypoints.predict:main"
 msc_feature_extraction = "msc.entrypoints.get_feature_parquet:main"
+
+[project.optional-dependencies]
+serve = [
+    "fastapi[standard]>=0.115.4",
+]
+
+catboost = [
+    "catboost>=1.2.7",
+]
+
+lightgbm = [
+    "lightgbm>=4.5.0",
+]
+
+xgboost = [
+    "xgboost>=2.1.2",
+]
+
+train = [
+    "catboost>=1.2.7",
+    "lightgbm>=4.5.0",
+    "xgboost>=2.1.2",
+]
+
+pixel = [
+    "scikit-image>=0.24.0",
+]

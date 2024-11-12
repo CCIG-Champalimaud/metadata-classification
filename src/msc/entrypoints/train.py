@@ -17,9 +17,8 @@ from sklearn.feature_selection import VarianceThreshold
 from catboost import EFstrType, Pool, FeaturesData
 
 from ..feature_extraction import RemoveNan, TextColsToCounts
-from ..sanitization import text_sep_cols, num_sep_cols, num_cols
 from ..data_loading import data_loading_wraper
-from ..train_utils import model_dict
+from ..train_utils import model_dict, ModelConstructor
 
 N_ITER = 50
 
@@ -66,6 +65,8 @@ def read_params(expr_list: list[str]) -> dict:
 
 
 def main():
+    from ..sanitization import text_sep_cols, num_sep_cols, num_cols
+
     parser = argparse.ArgumentParser(description="Cross validates models.")
 
     parser.add_argument(
@@ -208,6 +209,7 @@ def main():
         num_sep_cols = [x for x in num_sep_cols if x in args.include_cols]
         num_cols = [x for x in num_cols if x in args.include_cols]
 
+    mc = ModelConstructor(args.task_name)
     md = model_dict[args.task_name][args.model_name]
 
     if args.model_name in ["rf", "elastic", "extra_trees", "xgb", "lgb"]:
@@ -274,7 +276,7 @@ def main():
             p = Pipeline(
                 [
                     ("rzv", VarianceThreshold()),
-                    ("model", md["model"](**md["params"])),
+                    ("model", mc(model_name)(**md["params"])),
                 ]
             )
 
@@ -333,7 +335,7 @@ def main():
             print(
                 f"\tTraining model {model_name} with {len(training_X)} samples"
             )
-            model = md["model"](**md["params"])
+            model = mc(model_name)(**md["params"])
             if len(md["cv_params"]) == 0:
                 model.fit(training_data)
             else:

@@ -8,12 +8,6 @@ from glob import glob
 from pydicom.filereader import dcmread
 from pydicom.dataset import Dataset
 from scipy import stats
-from skimage.measure import (
-    moments_hu,
-    shannon_entropy,
-    inertia_tensor_eigvals,
-    blur_effect,
-)
 
 seg_sop = "1.2.840.10008.5.1.4.1.1.66.4"
 
@@ -333,6 +327,17 @@ def extract_pixel_features(dicom_file: Dataset) -> dict:
     Returns:
         dict: pixel-wise features.
     """
+    try:
+        from skimage.measure import (
+            moments_hu,
+            shannon_entropy,
+            inertia_tensor_eigvals,
+            blur_effect,
+        )
+    except ImportError:
+        raise ImportError(
+            "The scikit-image is required to extract pixel-wise features."
+        )
     pixel_array = dicom_file.pixel_array.astype(np.float32)
     flat_array = pixel_array.flatten()
     features = {

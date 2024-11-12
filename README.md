@@ -17,10 +17,16 @@ To manage dependencies we use `micromamba` and `uv`, a Python package manager. T
 1. `micromamba create -n dicom-classification`
 2. `micromamba activate dicom-classification`
 3. `micromamba install python=$(cat .python-version) uv -c conda-forge -y`
-4. `uv build`
-5. `uv pip install dist/msc-0.1.0-py3-none-any.whl`
+4. `uv sync`
 
 And you should be all set!
+
+In `pyproject.toml` we specify different optional dependencies depending on what you want to do. This helps us keep the dependencies manageable and light.
+
+* If you want to train models, you need to add `--extra train` to `uv sync`
+* If you want to serve models using `fastapi`, you need to add `--extra serve` to `uv sync`
+* If you want to serve `catboost`, `lightgbm` or `xgboost` models, you need to add `--extra server catboost`, `--extra server lightgbm` or `--extra server xgboost` to `uv sync`, respectively
+* If you want to extract pixel features you need to add `--extra pixel` to `uv sync`
 
 ## Code details
 

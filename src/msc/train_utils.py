@@ -1,19 +1,89 @@
-from sklearn.ensemble import (
-    RandomForestClassifier,
-    ExtraTreesClassifier,
-    RandomForestRegressor,
-    ExtraTreesRegressor,
-)
-from sklearn.linear_model import SGDClassifier, SGDRegressor
-from xgboost import XGBClassifier, XGBRegressor
-from catboost import CatBoostClassifier, CatBoostRegressor
-from lightgbm import LGBMClassifier, LGBMRegressor
+import importlib
+from dataclasses import dataclass
 from scipy.stats import loguniform, randint
+
+
+@dataclass
+class ModelConstructor:
+    task_type: str
+    """
+    Class to construct models.
+        
+    Args:
+        task_type (str): Type of task (classification or regression).
+    """
+
+    def import_models(self, lib: str, model_names: list[str]):
+        """
+        Convenience function to import models using exec.
+        """
+        try:
+            module = importlib.import_module(lib)
+            models = []
+            for model_name in model_names:
+                models.append(getattr(module, model_name))
+            return models
+        except ModuleNotFoundError:
+            lib = lib.split(".")[0]
+            raise ImportError(f"Could not import {lib} - please install it.")
+
+    @property
+    def model_dict(self):
+        """
+        Model import dictionary.
+        """
+        return {
+            "rf": {
+                "lib": "sklearn.ensemble",
+                "models": ["RandomForestClassifier", "RandomForestRegressor"],
+            },
+            "extra_trees": {
+                "lib": "sklearn.ensemble",
+                "models": ["ExtraTreesClassifier", "ExtraTreesRegressor"],
+            },
+            "elastic": {
+                "lib": "sklearn.linear_model",
+                "models": ["SGDClassifier", "SGDRegressor"],
+            },
+            "xgb": {
+                "lib": "xgboost",
+                "models": ["XGBClassifier", "XGBRegressor"],
+            },
+            "lgbm": {
+                "lib": "lightgbm",
+                "models": ["LGBMClassifier", "LGBMRegressor"],
+            },
+            "catboost": {
+                "lib": "catboost",
+                "models": ["CatBoostClassifier", "CatBoostRegressor"],
+            },
+        }
+
+    def __call__(self, model_name: str):
+        """
+        Returns the constructor for a given model name and task type.
+
+        Args:
+            model_name (str): Name of the model.
+
+        Returns:
+            Callable: Constructor for the model.
+        """
+
+        if model_name in self.model_dict:
+            lib, models = self.model_dict[model_name].values()
+            models = self.import_models(lib, models)
+            if self.task_type == "classification":
+                return models[0]
+            elif self.task_type == "regression":
+                return models[1]
+        else:
+            raise ValueError(f"Unknown model name: {model_name}")
+
 
 model_dict = {
     "classification": {
         "rf": {
-            "model": RandomForestClassifier,
             "params": {"max_features": "sqrt", "n_estimators": 50},
             "cv_params": {
                 "max_depth": [None, 10, 20],
@@ -21,12 +91,10 @@ model_dict = {
             },
         },
         "elastic": {
-            "model": SGDClassifier,
             "params": {"penalty": "elasticnet", "loss": "modified_huber"},
             "cv_params": {"l1_ratio": loguniform(0.1, 0.99)},
         },
         "extra_trees": {
-            "model": ExtraTreesClassifier,
             "params": {"max_features": "sqrt"},
             "cv_params": {
                 "max_depth": [None, 10, 20],
@@ -34,7 +102,6 @@ model_dict = {
             },
         },
         "xgb": {
-            "model": XGBClassifier,
             "params": {
                 "objective": "multi:softproba",
                 "n_jobs": 2,
@@ -52,7 +119,6 @@ model_dict = {
             },
         },
         "lgb": {
-            "model": LGBMClassifier(),
             "params": {
                 "objective": "multiclass",
                 "n_jobs": 1,
@@ -69,7 +135,6 @@ model_dict = {
             },
         },
         "catboost": {
-            "model": CatBoostClassifier,
             "params": {
                 "iterations": 1000,
                 "verbose": False,
@@ -86,7 +151,6 @@ model_dict = {
     },
     "regression": {
         "rf": {
-            "model": RandomForestRegressor,
             "params": {"max_features": "sqrt", "n_estimators": 50},
             "cv_params": {
                 "max_depth": [None, 10, 20],
@@ -94,12 +158,10 @@ model_dict = {
             },
         },
         "elastic": {
-            "model": SGDRegressor,
             "params": {"penalty": "elasticnet", "loss": "modified_huber"},
             "cv_params": {"l1_ratio": loguniform(0.1, 0.99)},
         },
         "extra_trees": {
-            "model": ExtraTreesRegressor,
             "params": {"max_features": "sqrt"},
             "cv_params": {
                 "max_depth": [None, 10, 20],
@@ -107,7 +169,6 @@ model_dict = {
             },
         },
         "xgb": {
-            "model": XGBRegressor,
             "params": {
                 "objective": "reg:squarederror",
                 "n_jobs": 2,
@@ -125,7 +186,6 @@ model_dict = {
             },
         },
         "lgb": {
-            "model": LGBMRegressor,
             "params": {
                 "objective": "regression",
                 "n_jobs": 1,
@@ -142,7 +202,6 @@ model_dict = {
             },
         },
         "catboost": {
-            "model": CatBoostRegressor,
             "params": {
                 "iterations": 1000,
                 "verbose": False,
