@@ -127,8 +127,6 @@ def summarise_columns(
         pl.DataFrame: summarised column.
     """
     cols = x.columns
-    print(group_cols)
-    print(cols)
     group_cols = [x for x in group_cols if x in cols]
     if len(group_cols) == 0:
         raise ValueError("No column in group_cols was present in x")
