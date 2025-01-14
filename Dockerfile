@@ -1,21 +1,21 @@
-FROM mambaorg/micromamba:0.27.0
+FROM ghcr.io/astral-sh/uv:python3.11-bookworm-slim
 
-USER root
+WORKDIR /app
 
-WORKDIR /app/
+ENV UV_COMPILE_BYTECODE=1
+ENV UV_LINK_MODE=copy
 
-COPY --chown=$MAMBA_USER:$MAMBA_USER environment-docker-prediction-catboost.yaml /tmp/env.yaml
-RUN micromamba install -y -n base -f /tmp/env.yaml && \
-    micromamba clean --all --yes
+COPY uv.lock pyproject.toml README.md /app/
 
-RUN mkdir -p models
-RUN mkdir -p /dicom
-COPY models/catboost.percent_phase_field_of_view:sar:series_description.pkl models
+RUN uv sync --frozen --no-install-project --no-dev --no-cache
 
+RUN mkdir -p /models
+
+COPY models/xgb.standard.100.pkl /models
 COPY src src
-COPY predict-docker.sh predict.sh
-RUN chmod +x predict.sh
+RUN uv sync --frozen --no-dev --no-cache --extra xgboost --extra serve
+RUN uv clean
+COPY config-api-docker.yaml config-api.yaml
 
-ARG MAMBA_DOCKERFILE_ACTIVATE=1
-
-ENTRYPOINT ["./predict.sh"]
+# Reset the entrypoint, don't invoke `uv`
+ENTRYPOINT ["uv", "run"]
