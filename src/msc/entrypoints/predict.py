@@ -4,7 +4,6 @@ import joblib
 import numpy as np
 import polars as pl
 from scipy.stats import mode
-from catboost import FeaturesData
 from ..feature_extraction import TextColsToCounts
 from ..constants import text_sep_cols, num_sep_cols, num_cols
 from ..sanitization import sanitize_data
@@ -73,6 +72,8 @@ def predict_non_catboost(
 
 
 def predict_catboost(model: dict, features: pl.DataFrame) -> list[np.ndarray]:
+    from catboost import FeaturesData
+
     fc = text_sep_cols + num_sep_cols
     curr_predictions = []
     for fold in model["cv"]:
