@@ -47,6 +47,7 @@ def main():
         type=str,
         help="Study UID",
         required=True,
+        nargs="+",
     )
 
     args = parser.parse_args()
@@ -76,7 +77,7 @@ def main():
         dicom_web_url=args.dicomweb_url,
     )
 
-    print(model_server.predict_dicomweb_api(prediction_request))
+    return model_server.predict_dicomweb_api(prediction_request)
 
 
 if __name__ == "__main___":

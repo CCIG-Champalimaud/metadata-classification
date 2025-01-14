@@ -33,7 +33,7 @@ class OrthancPredictionRequest(BaseModel):
     """
 
     prediction_model_id: str
-    study_uid: str
+    study_uid: str | list[str]
     update_labels: bool = False
 
 
@@ -43,7 +43,7 @@ class DICOMWebPredictionRequest(BaseModel):
     """
 
     prediction_model_id: str
-    study_uid: str
+    study_uid: str | list[str]
     dicom_web_url: str | None = None
 
 
@@ -188,9 +188,17 @@ class ModelServer:
                 detail="DICOMWEB_URL, DICOMWEB_USER and DICOMWEB_PASSWORD should be defined.",
             )
         start_time = time.time()
-        features = self.dicomweb_helper.get_study_features(
-            prediction_request.study_uid
-        )
+        if isinstance(prediction_request.study_uid, str):
+            features = self.dicomweb_helper.get_study_features(
+                prediction_request.study_uid
+            )
+        else:
+            features = [
+                self.dicomweb_helper.get_study_features(x)
+                for x in prediction_request.study_uid
+            ]
+            features = pl.concat(features, how="diagonal")
+
         features = summarise_columns(features)
         prediction = self.predict_from_features(
             prediction_request.prediction_model_id, features
