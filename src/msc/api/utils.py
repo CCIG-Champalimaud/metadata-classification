@@ -55,11 +55,18 @@ class DicomWebHelper:
             for k in inverted_dicom_header_dict
         }
 
+    def get_url(self, url: str | None = None) -> str:
+        """
+        Gets the url. Defaults to self.url if url is None.
+        """
+        return self.url if url is None else url
+
     def get(
         self,
         study_uid: str,
         series_uid: str | None = None,
         instance_uid: str | None = None,
+        url: str | None = None,
     ) -> dict:
         """
         Gets all studies from dicom web.
@@ -68,11 +75,12 @@ class DicomWebHelper:
             study_uid (str): study uid.
             series_uid (uid): series uid.
             instance_uid (uid): instance uid.
+            url (str): url. Overrides self.url.
 
         Returns:
             dict: study.
         """
-        url = f"{self.url}/studies/{study_uid}/series"
+        url = f"{self.get_url(url)}/studies/{study_uid}/series"
         if series_uid is not None:
             url = f"{url}/{series_uid}/instances"
         if instance_uid is not None:
@@ -81,39 +89,46 @@ class DicomWebHelper:
             url, auth=self.auth, headers={"Accept": "application/json"}
         ).json()
 
-    def get_series_in_study(self, study_uid: str) -> dict:
+    def get_series_in_study(
+        self, study_uid: str, url: str | None = None
+    ) -> dict:
         """
         Gets all series in a study from dicom web.
 
         Args:
             study_uid (str): study uid.
+            url (str): url. Overrides self.url.
 
         Returns:
             dict: study.
         """
         return requests.get(
-            f"{self.url}/studies/{study_uid}/series",
+            f"{self.get_url(url)}/studies/{study_uid}/series",
             auth=self.auth,
             headers={"Accept": "application/json"},
         ).json()
 
-    def get_series_metadata(self, study_uid: str, series_uid: str) -> dict:
+    def get_series_metadata(
+        self, study_uid: str, series_uid: str, url: str | None = None
+    ) -> dict:
         """
         Gets metadata for a series from orthanc.
 
         Args:
             study_uid (str): study uid.
             series_uid (str): series uid.
+            url (str): url. Overrides self.url.
 
         Returns:
             dict: series.
         """
-        instance_uids = self.get(study_uid, series_uid)
+        instance_uids = self.get(study_uid, series_uid, url=url)
         return [
             self.get(
                 study_uid,
                 series_uid,
                 instance_uid[self.INSTANCE_UID_KEY]["Value"][0],
+                url=url,
             )[0]
             for instance_uid in instance_uids
         ]
@@ -133,7 +148,7 @@ class DicomWebHelper:
         output = {}
         for k in metadata:
             if k in self.dicom_header_dict:
-                value = metadata[k]["Value"]
+                value = metadata[k].get("Value", None)
                 value = "-" if value is None else process_value(value)
                 output[self.dicom_header_dict[k]] = value
         missing = []
@@ -143,21 +158,24 @@ class DicomWebHelper:
                 output[self.dicom_header_dict[k]] = "-"
         return output
 
-    def get_study_features(self, study_uid: str) -> pl.DataFrame:
+    def get_study_features(
+        self, study_uid: str, url: str | None = None
+    ) -> pl.DataFrame:
         """
         Gets features for a study.
 
         Args:
             study_uid (str): study uid.
+            url (str | None): url. Overrides self.url.
 
         Returns:
             pl.DataFrame: study features.
         """
         out = []
-        series = self.get(study_uid)
+        series = self.get(study_uid, url=url)
         for s in series:
             metadata = self.get_series_metadata(
-                study_uid, s[self.SERIES_UID_KEY]["Value"][0]
+                study_uid, s[self.SERIES_UID_KEY]["Value"][0], url=url
             )
             n = len(metadata)
             for m in metadata:
