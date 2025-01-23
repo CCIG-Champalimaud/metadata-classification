@@ -4,5 +4,5 @@ models:
     matches: ["ADC", "DCE", "DWI", "Others", "T2W"]
     heuristics: "prostate_mpmri"
     filters:
-      BodyPartExamined: ["PROSTATE", "PELVIS", "GENITOURINARY SYSTEM"]
-      Modality: ["MR"]
+      # body_part_examined: "PROSTATE|PELVIS|GENITOURINARY SYSTEM"
+      modality: "MR"

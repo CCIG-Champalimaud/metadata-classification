@@ -124,11 +124,32 @@ class ModelServer:
         predictions = predictions.to_dict(as_series=False)
         return predictions
 
+    def filter_features(
+        self, features: pl.DataFrame, filters: dict[str, str | list[str]] | None
+    ) -> pl.DataFrame:
+        def process_filters(filters: list[str] | str) -> str:
+            if isinstance(filters, list):
+                filters = "|".join(filters)
+            return filters
+
+        if filters is not None:
+            filters = [
+                pl.col(key)
+                .str.to_lowercase()
+                .str.contains(process_filters(filters[key].lower()))
+                for key in filters
+            ]
+            features = features.filter(*filters)
+        return features
+
     def predict(self, prediction_model_id: str, dicom_path: str):
         """
         Predict the type of sequence.
         """
         features = read_data(dicom_path)
+        features = self.filter_features(
+            features, self.filters[prediction_model_id]
+        )
         predictions = self.predict_from_features(prediction_model_id, features)
         return predictions
 
@@ -159,6 +180,9 @@ class ModelServer:
             prediction_request.study_uid
         )
         features = summarise_columns(features)
+        features = self.filter_features(
+            features, self.filters[prediction_request.prediction_model_id]
+        )
         prediction = self.predict_from_features(
             prediction_request.prediction_model_id, features
         )
@@ -182,6 +206,7 @@ class ModelServer:
         """
         Predict the types of sequences in an Orthanc study.
         """
+        filters = self.filters.get(prediction_request.prediction_model_id, None)
         if self.dicomweb_helper is None:
             raise HTTPException(
                 status_code=400,
@@ -200,6 +225,9 @@ class ModelServer:
             features = pl.concat(features, how="diagonal")
 
         features = summarise_columns(features)
+        features = self.filter_features(
+            features, self.filters[prediction_request.prediction_model_id]
+        )
         prediction = self.predict_from_features(
             prediction_request.prediction_model_id, features
         )

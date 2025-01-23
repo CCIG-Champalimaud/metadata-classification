@@ -45,7 +45,7 @@ model_server = ModelServer(
     filters=api_filter_dict,
 )
 model_server.register_dicomweb_helper(dicomweb_helper)
-model_server.register_dicomweb_helper(orthanc_helper)
+model_server.register_orthanc_helper(orthanc_helper)
 
 app.add_api_route(
     "/predict", endpoint=model_server.predict_api, methods=["POST"]

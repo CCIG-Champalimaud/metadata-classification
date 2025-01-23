@@ -28,6 +28,7 @@ dicom_header_dict = dict(
     magnetic_field_strength=("0018", "0087"),
     manufacturer=("0008", "0070"),
     manufacturer_model_name=("0008", "1090"),
+    body_part_examined=("0018", "0015"),
     number_of_phase_encoding_steps=("0018", "0089"),
     percent_phase_field_of_view=("0018", "0094"),
     pixel_bandwidth=("0018", "0095"),
