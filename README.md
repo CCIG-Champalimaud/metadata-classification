@@ -65,13 +65,14 @@ The extraction of metadata values from each DICOM series, which can be run as a 
 
 This is also a CLI (`msc_train`) whose details are available with the `--help` flag. **Training requires as input a CSV, TSV or parquet file with all the tags produced by `msc_feature_extraction`.** Inspection of this code will reveal that there are several different possible models. A more practical example of training is available in the snakemake pipeline `train_all_models.smk`.
 
-### Inference
+### Inference (prediction)
 
 *In `src/msc/entrypoints/predict.py`*
 
 This is what end users should focus on using - we have made it as simple as possible to use this, so it shouldn't take more than running the following code:
 
 ```bash
+# this requires training a model
 MODEL_PATH=models/catboost.percent_phase_field_of_view:sar:series_description.pkl
 python msc_predict \
     --input_path <PATH TO DICOM DIRECTORY> \
