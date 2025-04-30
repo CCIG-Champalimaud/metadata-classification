@@ -11,6 +11,28 @@ from ..data_loading import read_data
 from ..heuristics import heuristics_dict
 
 
+class RemappingUnpickler(dill.Unpickler):
+    """Custom unpickler that remaps module paths during deserialization.
+
+    This class extends dill.Unpickler to handle cases where package structures
+    have changed between serialization and deserialization. It specifically
+    remaps paths from "old_package" to "new_package" to maintain compatibility
+    with previously serialized objects.
+
+    Example:
+        with open("model.pkl", "rb") as f:
+            unpickler = RemappingUnpickler(f)
+            model = unpickler.load()
+    """
+
+    def find_class(self, module, name):
+        if module == "src.msc":
+            module = "msc"
+        elif module.startswith("src"):
+            module = module.replace("src.", "", 1)
+        return super().find_class(module, name)
+
+
 def mode(x: np.ndarray) -> np.ndarray:
     """Calculates the mode of an array.
 
@@ -209,7 +231,8 @@ def main():
         if model_extension == "joblib":
             model = joblib.load(model_path)
         else:
-            model = dill.load(open(model_path, "rb"))
+            with open(model_path, "rb") as o:
+                model = RemappingUnpickler(o).load()
         task = model["args"].get("task_name", "classification")
         is_catboost = model["args"].get("model_name") == "catboost"
         if is_catboost:

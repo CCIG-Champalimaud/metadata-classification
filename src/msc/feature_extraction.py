@@ -112,7 +112,11 @@ class SpaceSepNumColsToMatrix(BaseEstimator, TransformerMixin):
                 )
                 .drop("feature")
             )
-            mat[np.isnan(mat)] = self.default_value
+            # makes compliant with earlier versions
+            if hasattr(self, "default_value"):
+                mat[np.isnan(mat)] = self.default_value
+            else:
+                mat[np.isnan(mat)] = -1
         return mat
 
     def fit_transform(self, X, y=None) -> np.ndarray:
