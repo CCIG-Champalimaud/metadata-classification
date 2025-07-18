@@ -142,3 +142,10 @@ The following environment variables are used to define the URLs and users for Or
 We recommend having a file (i.e. `.env`) which is sourced with these constants prior to API utilization as it greatly simplifies this process.
 
 While we considered including the Orthanc and DICOM-web credentials in the configuration file, we decided against this as it would make it easier to leak the credentials (and this allows easier deployment through Docker/Docker-compose/Kubernetes/etc through the definition of environment variables in the manifest files).
+
+# Reference
+
+If you use this please cite our work available [here](https://insightsimaging.springeropen.com/articles/10.1186/s13244-025-01938-2):
+
+*de Almeida, J.G., Verde, A.S.C., Bilreiro, C. et al. Automatic sequence identification in multicentric prostate multiparametric MRI datasets for clinical machine-learning. Insights Imaging 16, 75 (2025). https://doi.org/10.1186/s13244-025-01938-2*
+
