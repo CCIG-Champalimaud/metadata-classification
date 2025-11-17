@@ -8,8 +8,9 @@ from ..dicom_feature_extraction import extract_all_features
 
 
 class DICOMFeatureExtraction:
+
     def __init__(
-        self, metadata_features: bool = True, image_features: bool = True
+        self, metadata_features: bool = True, image_features: bool = False
     ):
         self.metadata_features = metadata_features
         self.image_features = image_features

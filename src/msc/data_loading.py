@@ -266,7 +266,6 @@ def read_data(
     Returns:
         pl.DataFrame: DICOM feature dataframe.
     """
-
     all_features = []
     reading_operators = {
         "dicom_dataset": [],

@@ -230,7 +230,7 @@ def extract_metadata_from_file(dicom_file: Dataset) -> dict:
         dicom_file["valid"] = False
     # skips file if SOP class is segmentation
     if dicom_file[0x0008, 0x0016].value == seg_sop:
-        dicom_file["seg"] = True
+        output_dict["seg"] = True
     for k in dicom_header_dict:
         dicom_key = converted_dicom_header_dict[k]
         if dicom_key in dicom_file:
@@ -259,7 +259,7 @@ def extract_features_from_dicom(
     path: str,
     join: bool = False,
     return_paths: bool = False,
-    image_features: bool = True,
+    image_features: bool = False,
 ) -> dict[str, list | str | float | int]:
     """
     Extract features (specified in ``dicom_header_dict``) from DICOM files in a
@@ -395,7 +395,7 @@ def extract_pixel_features_series(path: str) -> dict[str, list]:
 
 
 def extract_all_features(
-    path: str, metadata_features: bool = True, image_features: bool = True
+    path: str, metadata_features: bool = True, image_features: bool = False
 ) -> dict:
     """
     Extracts all features from a DICOM file.
