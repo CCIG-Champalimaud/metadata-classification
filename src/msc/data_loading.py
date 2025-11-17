@@ -37,7 +37,7 @@ def read_data_dicom_dataset(
     if n_workers > 0:
         with Pool(n_workers) as p:
             for f in tqdm(
-                p.imap(extract_features_from_dicom, all_series_paths),
+                p.imap_unordered(extract_features_from_dicom, all_series_paths),
                 total=n,
             ):
                 for k in f:
