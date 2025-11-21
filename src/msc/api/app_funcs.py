@@ -1,4 +1,5 @@
 import time as time
+import logging
 import dill
 import numpy as np
 import polars as pl
@@ -16,6 +17,9 @@ from ..entrypoints.predict import (
 )
 from ..heuristics import heuristics_dict
 from .utils import DicomWebHelper, OrthancHelper
+
+
+logger = logging.getLogger(__name__)
 
 
 class PredictionRequest(BaseModel):
@@ -55,6 +59,10 @@ class ModelServer:
     filters: dict[str, str | list[str]] | None = None
 
     def __post_init__(self):
+        logger.info(
+            "Initializing ModelServer",
+            extra={"n_models": len(self.model_dict)},
+        )
         self.models = {
             k: dill.load(open(self.model_dict[k], "rb"))
             for k in self.model_dict
@@ -65,16 +73,40 @@ class ModelServer:
         self.matches = {
             k: np.array(self.matches[k], dtype=str) for k in self.model_dict
         }
+        logger.debug(
+            "ModelServer initialized",
+            extra={
+                "model_ids": list(self.model_dict.keys()),
+                "has_heuristics": bool(self.heuristics),
+                "has_filters": bool(self.filters),
+            },
+        )
 
     def register_dicomweb_helper(self, dicomweb_helper: DicomWebHelper):
         self.dicomweb_helper = dicomweb_helper
+        logger.info(
+            "Registered DICOMweb helper",
+            extra={"enabled": dicomweb_helper is not None},
+        )
 
     def register_orthanc_helper(self, orthanc_helper: OrthancHelper):
         self.orthanc_helper = orthanc_helper
+        logger.info(
+            "Registered Orthanc helper",
+            extra={"enabled": orthanc_helper is not None},
+        )
 
     def predict_from_features(
         self, prediction_model_id: str, features: pl.DataFrame
     ):
+        logger.info(
+            "Running prediction from features",
+            extra={
+                "prediction_model_id": prediction_model_id,
+                "n_rows": features.height,
+                "n_columns": len(features.columns),
+            },
+        )
         model = self.models[prediction_model_id]
         task = model["args"].get("task_name", "classification")
         is_catboost = model["args"].get("model_name") == "catboost"
@@ -122,6 +154,14 @@ class ModelServer:
                 }
             )
         predictions = predictions.to_dict(as_series=False)
+        logger.info(
+            "Prediction from features completed",
+            extra={
+                "prediction_model_id": prediction_model_id,
+                "task": task,
+                "n_predictions": len(predictions.get("series_uid", [])),
+            },
+        )
         return predictions
 
     def filter_features(
@@ -139,6 +179,10 @@ class ModelServer:
                 .str.contains(process_filters(filters[key].lower()))
                 for key in filters
             ]
+            logger.info(
+                "Applying feature filters",
+                extra={"n_filters": len(filters)},
+            )
             features = features.filter(*filters)
         return features
 
@@ -146,6 +190,13 @@ class ModelServer:
         """
         Predict the type of sequence.
         """
+        logger.info(
+            "Predicting from DICOM path",
+            extra={
+                "prediction_model_id": prediction_model_id,
+                "dicom_path": dicom_path,
+            },
+        )
         features = read_data(dicom_path)
         features = self.filter_features(
             features, self.filters[prediction_model_id]
@@ -157,6 +208,13 @@ class ModelServer:
         """
         Predict the type of sequence.
         """
+        logger.info(
+            "Received prediction API request",
+            extra={
+                "prediction_model_id": prediction_request.prediction_model_id,
+                "dicom_path": prediction_request.dicom_path,
+            },
+        )
         start_time = time.time()
         prediction = self.predict(
             prediction_request.prediction_model_id,
@@ -164,6 +222,13 @@ class ModelServer:
         )
         end_time = time.time()
         prediction["time"] = end_time - start_time
+        logger.info(
+            "Prediction API request completed",
+            extra={
+                "prediction_model_id": prediction_request.prediction_model_id,
+                "elapsed_s": prediction["time"],
+            },
+        )
         return prediction
 
     def predict_orthanc_api(self, prediction_request: OrthancPredictionRequest):
@@ -171,10 +236,19 @@ class ModelServer:
         Predict the types of sequences in an Orthanc study.
         """
         if self.orthanc_helper is None:
+            logger.error("Orthanc helper is not configured")
             raise HTTPException(
                 status_code=400,
                 detail="ORTHANC_URL, ORTHANC_USER and ORTHANC_PASSWORD should be defined.",
             )
+        logger.info(
+            "Received Orthanc prediction request",
+            extra={
+                "prediction_model_id": prediction_request.prediction_model_id,
+                "study_uid": prediction_request.study_uid,
+                "update_labels": prediction_request.update_labels,
+            },
+        )
         start_time = time.time()
         features = self.orthanc_helper.get_study_features(
             prediction_request.study_uid
@@ -208,10 +282,18 @@ class ModelServer:
         """
         filters = self.filters.get(prediction_request.prediction_model_id, None)
         if self.dicomweb_helper is None:
+            logger.error("DICOMweb helper is not configured")
             raise HTTPException(
                 status_code=400,
                 detail="DICOMWEB_URL, DICOMWEB_USER and DICOMWEB_PASSWORD should be defined.",
             )
+        logger.info(
+            "Received DICOMweb prediction request",
+            extra={
+                "prediction_model_id": prediction_request.prediction_model_id,
+                "study_uid": prediction_request.study_uid,
+            },
+        )
         start_time = time.time()
         if isinstance(prediction_request.study_uid, str):
             features = self.dicomweb_helper.get_study_features(
@@ -233,6 +315,13 @@ class ModelServer:
         )
         end_time = time.time()
         prediction["time"] = end_time - start_time
+        logger.info(
+            "DICOMweb prediction request completed",
+            extra={
+                "prediction_model_id": prediction_request.prediction_model_id,
+                "elapsed_s": prediction["time"],
+            },
+        )
         return prediction
 
 
@@ -264,4 +353,13 @@ def configuration_to_model_dicts(
             ]
         if "filters" in configuration["models"][model]:
             api_filter_dict[model] = configuration["models"][model]["filters"]
+    logger.info(
+        "Parsed configuration into model dictionaries",
+        extra={
+            "n_models": len(api_model_dict),
+            "with_matches": len(api_match_dict),
+            "with_heuristics": len(api_heuristics_dict),
+            "with_filters": len(api_filter_dict),
+        },
+    )
     return api_model_dict, api_match_dict, api_heuristics_dict, api_filter_dict

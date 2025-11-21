@@ -1,3 +1,4 @@
+import logging
 import requests
 import polars as pl
 from dataclasses import dataclass
@@ -6,6 +7,9 @@ from ..dicom_feature_extraction import (
     inverted_dicom_header_dict,
     process_series_description,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 def process_value(value: str | list | float | int) -> str:
@@ -54,6 +58,10 @@ class DicomWebHelper:
             "".join(k): inverted_dicom_header_dict[k]
             for k in inverted_dicom_header_dict
         }
+        logger.info(
+            "Initialized DicomWebHelper",
+            extra={"url": self.url, "auth_enabled": self.auth is not None},
+        )
 
     def get_url(self, url: str | None = None) -> str:
         """
@@ -85,6 +93,15 @@ class DicomWebHelper:
             url = f"{url}/{series_uid}/instances"
         if instance_uid is not None:
             url = f"{url}/{instance_uid}/metadata"
+        logger.debug(
+            "DicomWebHelper GET",
+            extra={
+                "study_uid": study_uid,
+                "series_uid": series_uid,
+                "instance_uid": instance_uid,
+                "url": url,
+            },
+        )
         return requests.get(
             url, auth=self.auth, headers={"Accept": "application/json"}
         ).json()
@@ -102,6 +119,10 @@ class DicomWebHelper:
         Returns:
             dict: study.
         """
+        logger.debug(
+            "DicomWebHelper get_series_in_study",
+            extra={"study_uid": study_uid, "url": url},
+        )
         return requests.get(
             f"{self.get_url(url)}/studies/{study_uid}/series",
             auth=self.auth,
@@ -122,6 +143,14 @@ class DicomWebHelper:
         Returns:
             dict: series.
         """
+        logger.debug(
+            "DicomWebHelper get_series_metadata",
+            extra={
+                "study_uid": study_uid,
+                "series_uid": series_uid,
+                "url": url,
+            },
+        )
         instance_uids = self.get(study_uid, series_uid, url=url)
         return [
             self.get(
@@ -172,6 +201,9 @@ class DicomWebHelper:
             pl.DataFrame: study features.
         """
         out = []
+        logger.info(
+            "Fetching DICOMweb study features", extra={"study_uid": study_uid}
+        )
         series = self.get(study_uid, url=url)
         for s in series:
             metadata = self.get_series_metadata(
@@ -189,6 +221,10 @@ class DicomWebHelper:
                 )
                 out.append(m)
         features = pl.DataFrame(out)
+        logger.info(
+            "Constructed DICOMweb features DataFrame",
+            extra={"study_uid": study_uid, "n_rows": features.height},
+        )
         return features
 
 
@@ -275,6 +311,10 @@ class OrthancHelper:
         Returns:
             dict: study.
         """
+        logger.debug(
+            "OrthancHelper get_series_in_study",
+            extra={"study_uid": study_uid, "has_filters": filters is not None},
+        )
         out = requests.get(
             f"{self.url}/studies/{study_uid}/series",
             auth=self.auth,
@@ -295,6 +335,10 @@ class OrthancHelper:
         Returns:
             dict: series.
         """
+        logger.debug(
+            "OrthancHelper get_series_metadata",
+            extra={"n_series": len(series_uids)},
+        )
         return [
             requests.get(
                 f"{self.url}/instances/{series_uid}/tags",
@@ -343,6 +387,10 @@ class OrthancHelper:
             pl.DataFrame: study features.
         """
         out = []
+        logger.info(
+            "Fetching Orthanc study features",
+            extra={"study_uid": study_uid, "has_filters": filters is not None},
+        )
         series = self.get_series_in_study(study_uid, filters)
         for s in series:
             n = len(s["Instances"])
@@ -371,6 +419,14 @@ class OrthancHelper:
         valid_categories = ["patients", "studies", "series"]
         if category not in valid_categories:
             raise ValueError(f"Category must be one of {valid_categories}")
+        logger.info(
+            "Putting Orthanc label",
+            extra={
+                "category": category,
+                "identifier": identifier,
+                "label": label,
+            },
+        )
         requests.put(
             f"{self.url}/{category}/{identifier}/labels/{label}",
             headers={"Accept": "application/json"},
