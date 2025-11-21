@@ -1,8 +1,12 @@
+import logging
 import numpy as np
 import polars as pl
 from copy import deepcopy
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.feature_extraction.text import CountVectorizer
+
+
+logger = logging.getLogger(__name__)
 
 
 class SpaceSepNumColsToMatrix(BaseEstimator, TransformerMixin):
@@ -54,6 +58,9 @@ class SpaceSepNumColsToMatrix(BaseEstimator, TransformerMixin):
             X (np.ndarray): input data.
             y (None, optional): not used. Defaults to None.
         """
+        logger.debug(
+            "Fitting SpaceSepNumColsToMatrix", extra={"standard": self.standard}
+        )
         X = self.to_polars(X)
         sizes = X.with_columns(
             pl.col("feature").str.split(" ").list.len().alias("feature")
@@ -66,6 +73,13 @@ class SpaceSepNumColsToMatrix(BaseEstimator, TransformerMixin):
             self.transform_ = "standard"
             self.n_features_ = sizes[0]
             self.feature_names_ = [i for i in range(self.n_features_)]
+        logger.info(
+            "Fitted SpaceSepNumColsToMatrix",
+            extra={
+                "transform_mode": self.transform_,
+                "n_features": self.n_features_,
+            },
+        )
         return self
 
     def transform(self, X: np.ndarray, y: None = None) -> np.ndarray:
@@ -117,6 +131,10 @@ class SpaceSepNumColsToMatrix(BaseEstimator, TransformerMixin):
                 mat[np.isnan(mat)] = self.default_value
             else:
                 mat[np.isnan(mat)] = -1
+        logger.debug(
+            "Finished SpaceSepNumColsToMatrix transform",
+            extra={"shape": getattr(mat, "shape", None)},
+        )
         return mat
 
     def fit_transform(self, X, y=None) -> np.ndarray:
@@ -165,6 +183,14 @@ class TextColsToCounts(BaseEstimator, TransformerMixin):
             X (np.ndarray): input data array.
             y (None, optional): not used. Defaults to None.
         """
+        logger.info(
+            "Fitting TextColsToCounts",
+            extra={
+                "n_text_cols": len(self.text_cols),
+                "n_text_num_cols": len(self.text_num_cols),
+                "n_num_cols": len(self.num_cols),
+            },
+        )
         self.all_cols_ = sorted(
             [*self.num_cols, *self.text_cols, *self.text_num_cols]
         )
@@ -172,6 +198,10 @@ class TextColsToCounts(BaseEstimator, TransformerMixin):
         self.vectorizers_ = {}
         self.col_name_dict_ = {}
         for col in self.text_cols:
+            logger.debug(
+                "Fitting CountVectorizer for text column",
+                extra={"col_index": col, "col_name": self.text_cols[col]},
+            )
             self.vectorizers_[col] = CountVectorizer(
                 stop_words=None,
                 lowercase=True,
@@ -187,6 +217,10 @@ class TextColsToCounts(BaseEstimator, TransformerMixin):
                 for x in self.vectorizers_[col].vocabulary_
             ]
         for col in self.text_num_cols:
+            logger.debug(
+                "Fitting SpaceSepNumColsToMatrix for text-num column",
+                extra={"col_index": col, "col_name": self.text_num_cols[col]},
+            )
             self.vectorizers_[col] = SpaceSepNumColsToMatrix()
             d = X[:, col]
             self.vectorizers_[col].fit(d)
@@ -215,6 +249,7 @@ class TextColsToCounts(BaseEstimator, TransformerMixin):
         Returns:
             np.ndarray: transformed array.
         """
+        logger.debug("Transforming data with TextColsToCounts")
         all_cols = [
             *[self.text_cols[k] for k in self.text_cols],
             *[self.text_num_cols[k] for k in self.text_num_cols],
@@ -257,6 +292,9 @@ class TextColsToCounts(BaseEstimator, TransformerMixin):
                     continue
                 output.append(mat)
         output = np.concatenate(output, axis=1).astype(np.float32)
+        logger.debug(
+            "Finished TextColsToCounts transform", extra={"shape": output.shape}
+        )
         return output
 
     def fit_transform(self, X, y=None):
@@ -298,10 +336,18 @@ class RemoveNan(BaseEstimator, TransformerMixin):
         Returns:
             np.ndarray: ``X`` and ``y`` without rows with more than 1 nan value.
         """
+        logger.debug(
+            "Removing rows with more than 1 NaN",
+            extra={"original_shape": X.shape},
+        )
         X = deepcopy(X)
         idxs = np.isnan(X).sum(1) > 1
         X = X[~idxs]
         y = y[~idxs]
+        logger.info(
+            "Removed rows with excessive NaNs",
+            extra={"n_removed": int(idxs.sum()), "new_shape": X.shape},
+        )
         return X, y
 
     def fit_transform(self, X, y):

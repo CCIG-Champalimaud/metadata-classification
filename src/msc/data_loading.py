@@ -1,6 +1,7 @@
 import os
 import re
 import json
+import logging
 import polars as pl
 from glob import glob
 from multiprocessing import Pool
@@ -15,9 +16,19 @@ from .sanitization import sanitize_data
 from .constants import cols_to_drop
 
 
+logger = logging.getLogger(__name__)
+
+
 def read_data_dicom_dataset(
     input_paths: list[str] | str, dicom_recursion: int, n_workers: int = 0
 ) -> pl.DataFrame:
+    logger.info(
+        "Reading DICOM dataset",
+        extra={
+            "dicom_recursion": dicom_recursion,
+            "n_workers": n_workers,
+        },
+    )
     if isinstance(input_paths, str):
         input_paths = [input_paths]
     all_series_paths = []
@@ -33,6 +44,7 @@ def read_data_dicom_dataset(
             )
         )
     n = len(all_series_paths)
+    logger.info("Found %d series paths in DICOM dataset", n)
     features = {}
     if n_workers > 0:
         with Pool(n_workers) as p:
@@ -52,19 +64,23 @@ def read_data_dicom_dataset(
                 if k not in features:
                     features[k] = []
                 features[k].extend(f[k])
+    logger.info("Finished feature extraction for DICOM dataset")
     features = pl.from_dict({k: features[k] for k in features})
     return features
 
 
 def read_data_dicom(input_path: str):
+    logger.info("Reading DICOM series", extra={"input_path": input_path})
     features = extract_features_from_dicom(input_path)
     features = {k: features[k] for k in features}
     features = pl.from_dict(features)
+    logger.debug("DICOM series read with %d features", len(features.columns))
     return features
 
 
 def read_data_csv_tsv(input_path: str):
     sep = "\t" if input_path[-3:] == "tsv" else ","
+    logger.info("Reading %s file", "TSV" if sep == "\t" else "CSV")
     features = pl.read_csv(
         input_path,
         separator=sep,
@@ -72,16 +88,28 @@ def read_data_csv_tsv(input_path: str):
         truncate_ragged_lines=True,
     )
     features.columns = [x.replace(" ", "_") for x in features.columns]
+    logger.debug(
+        "CSV/TSV file read with %d rows and %d columns",
+        features.height,
+        len(features.columns),
+    )
     return features
 
 
 def read_parquet(input_path: str):
+    logger.info("Reading parquet file", extra={"input_path": input_path})
     features = pl.read_parquet(input_path)
     features.columns = [x.replace(" ", "_") for x in features.columns]
+    logger.debug(
+        "Parquet file read with %d rows and %d columns",
+        features.height,
+        len(features.columns),
+    )
     return features
 
 
 def read_json(input_path: str):
+    logger.info("Reading JSON file", extra={"input_path": input_path})
     json_file = json.load(open(input_path, "r"))
     output_dict = {"patient_id": [], "study_uid": [], "series_uid": []}
     for patient_id in json_file:
@@ -107,6 +135,11 @@ def read_json(input_path: str):
                 output_dict["study_uid"].extend(stid)
                 output_dict["series_uid"].extend(seid)
     features = pl.from_dict(output_dict)
+    logger.debug(
+        "JSON file read with %d rows and %d columns",
+        features.height,
+        len(features.columns),
+    )
     return features
 
 
@@ -126,6 +159,7 @@ def summarise_columns(
     Returns:
         pl.DataFrame: summarised column.
     """
+    logger.info("Summarising columns", extra={"group_cols": group_cols})
     cols = x.columns
     group_cols = [x for x in group_cols if x in cols]
     if len(group_cols) == 0:
@@ -171,6 +205,9 @@ def summarise_columns(
             pl.col("study_uid").len().alias("number_of_images")
         )
     output = x.group_by(group_cols).agg(col_expressions)
+    logger.debug(
+        "Summarised dataframe from %d rows to %d rows", x.height, output.height
+    )
     return output
 
 
@@ -184,7 +221,9 @@ def camel_case_to_snake_case(name: str) -> str:
     Returns:
         str: snake case string.
     """
-    return re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
+    result = re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
+    logger.debug("Converted camelCase '%s' to snake_case '%s'", name, result)
+    return result
 
 
 def auto_match_columns(data: pl.DataFrame) -> pl.DataFrame:
@@ -203,6 +242,7 @@ def auto_match_columns(data: pl.DataFrame) -> pl.DataFrame:
             value = value.replace(sub_str, "_")
         return camel_case_to_snake_case(value)
 
+    logger.info("Auto-matching columns", extra={"n_columns": len(data.columns)})
     columns = data.columns
     dicom_header_names = list(dicom_header_dict.keys())
     rename_dict = {}
@@ -218,6 +258,13 @@ def auto_match_columns(data: pl.DataFrame) -> pl.DataFrame:
             rename_dict[c2] = best_match[1]
         else:
             no_good_match.append(c1)
+    logger.info(
+        "Auto-matching complete",
+        extra={
+            "n_matched": len(rename_dict),
+            "n_unmatched": len(no_good_match),
+        },
+    )
     return rename_dict, no_good_match
 
 
@@ -266,6 +313,16 @@ def read_data(
     Returns:
         pl.DataFrame: DICOM feature dataframe.
     """
+    logger.info(
+        "Reading data",
+        extra={
+            "input_paths": input_paths,
+            "dicom_recursion": dicom_recursion,
+            "n_workers": n_workers,
+            "group_cols": group_cols,
+            "auto_match": auto_match,
+        },
+    )
     all_features = []
     reading_operators = {
         "dicom_dataset": [],
@@ -296,6 +353,13 @@ def read_data(
 
     for reading_op in reading_operators:
         if len(reading_operators[reading_op]) > 0:
+            logger.info(
+                "Applying reading operator",
+                extra={
+                    "reading_op": reading_op,
+                    "n_paths": len(reading_operators[reading_op]),
+                },
+            )
             if reading_op == "dicom_dataset":
                 all_features.append(
                     read_data_dicom_dataset(
@@ -318,6 +382,9 @@ def read_data(
                     all_features.append(read_json(path))
 
     if len(all_features) > 1:
+        logger.info(
+            "Concatenating %d feature tables vertically", len(all_features)
+        )
         all_features = pl.concat(all_features, how="vertical")
     else:
         all_features = all_features[0]
@@ -328,11 +395,22 @@ def read_data(
     if auto_match is True:
         mapping, no_good_match = auto_match_columns(all_features)
         if len(no_good_match) > 0:
+            logger.error(
+                "Auto-matching failed for some columns",
+                extra={"no_good_match": no_good_match},
+            )
             raise ValueError(
                 f"Could not match columns with auto_match: {no_good_match}"
             )
     if group_cols is not None:
         all_features = summarise_columns(all_features, group_cols)
+    logger.info(
+        "Finished reading data",
+        extra={
+            "n_rows": all_features.height,
+            "n_columns": len(all_features.columns),
+        },
+    )
     return all_features
 
 
@@ -358,6 +436,15 @@ def data_loading_wraper(
         pl.DataFrame: polars dataframe for training.
     """
     # load data, fix some minor recurring issues
+    logger.info(
+        "Loading data for training",
+        extra={
+            "data_path": data_path,
+            "keep_series_uid": keep_series_uid,
+            "target_column": target_column,
+            "task": task,
+        },
+    )
     extension = data_path.split(".")[-1]
     if extension in ["tsv", "csv"]:
         data = read_data_csv_tsv(data_path)
@@ -368,10 +455,12 @@ def data_loading_wraper(
     else:
         raise NotImplementedError("Input must be csv, tsv or parquet file")
     if task == "classification":
+        logger.info("Preparing data for classification task")
         data = data.with_columns(
             pl.col(target_column).str.to_lowercase().alias(target_column)
         )
     else:
+        logger.info("Preparing data for regression task")
         data = data.with_columns(
             pl.col(target_column).cast(pl.Float32, strict=False)
         ).filter(
@@ -380,6 +469,7 @@ def data_loading_wraper(
         )
 
     # sanitize data
+    logger.info("Sanitising data")
     data = sanitize_data(data)
 
     cols_to_drop_current = [x for x in cols_to_drop if x in data.columns]
@@ -391,4 +481,12 @@ def data_loading_wraper(
     y = data[target_column].to_numpy()
     study_uids = data["study_uid"]
     unique_study_uids = list(set(study_uids))
+    logger.info(
+        "Data loading wrapper finished",
+        extra={
+            "n_samples": X.height,
+            "n_features": len(X.columns),
+            "n_unique_studies": len(unique_study_uids),
+        },
+    )
     return X, y, study_uids, unique_study_uids

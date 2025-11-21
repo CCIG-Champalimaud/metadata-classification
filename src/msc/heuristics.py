@@ -1,6 +1,10 @@
+import logging
 import numpy as np
 import polars as pl
 from dataclasses import dataclass
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -13,16 +17,38 @@ class StringVariable(str):
     def contains_generic(
         self, value: list[str], list_of_substr: list[str] | str
     ):
+        logger.debug(
+            "StringVariable.contains_generic called",
+            extra={"value": value, "list_of_substr": list_of_substr},
+        )
         return [
             (substr in value if substr[0] != "~" else substr[1:] not in value)
             for substr in list_of_substr
         ]
 
     def contains_all(self, value: list[str], list_of_substr: list[str]):
-        return all(self.contains_generic(value, list_of_substr))
+        result = all(self.contains_generic(value, list_of_substr))
+        logger.debug(
+            "StringVariable.contains_all",
+            extra={
+                "value": value,
+                "list_of_substr": list_of_substr,
+                "result": result,
+            },
+        )
+        return result
 
     def contains_any(self, value: list[str], list_of_substr: list[str]):
-        return any(self.contains_generic(value, list_of_substr))
+        result = any(self.contains_generic(value, list_of_substr))
+        logger.debug(
+            "StringVariable.contains_any",
+            extra={
+                "value": value,
+                "list_of_substr": list_of_substr,
+                "result": result,
+            },
+        )
+        return result
 
     def contains(
         self, list_of_substr: list[str], check: str = "all", split: str = None
@@ -33,9 +59,22 @@ class StringVariable(str):
         if check is not None:
             value = self.value.split(split)
         if check == "all":
-            return self.contains_all(value, list_of_substr)
+            result = self.contains_all(value, list_of_substr)
         elif check == "any":
-            return self.contains_any(value, list_of_substr)
+            result = self.contains_any(value, list_of_substr)
+        else:
+            result = False
+        logger.debug(
+            "StringVariable.contains",
+            extra={
+                "value": value,
+                "list_of_substr": list_of_substr,
+                "check": check,
+                "split": split,
+                "result": result,
+            },
+        )
+        return result
 
 
 def get_bvalues(features: pl.DataFrame) -> list[int | None | str]:
@@ -50,13 +89,19 @@ def get_bvalues(features: pl.DataFrame) -> list[int | None | str]:
         list[int | None | str]: list of values corresponding to bvalues, one
             for each row.
     """
+    logger.info(
+        "Extracting b-values",
+        extra={"n_rows": features.height},
+    )
     bvalues = features["diffusion_bvalue"].to_list()
     for key in ["diffusion_bvalue_ge", "diffusion_bvalue_siemens"]:
         if key in features:
+            logger.debug("Using proxy b-values column", extra={"column": key})
             bvalues_proxy = features[key].to_list()
             for i in range(len(bvalues)):
                 if bvalues[i] == "-" and bvalues_proxy[i] != "-":
                     bvalues[i] = bvalues_proxy[i]
+    logger.debug("Finished extracting b-values")
     return bvalues
 
 
@@ -76,6 +121,10 @@ def get_heuristics_prostate_mpmri(
             corresponding to positive classifications for T2W, ADC and DWI
             sequences.
     """
+    logger.info(
+        "Computing prostate mpMRI heuristics",
+        extra={"n_rows": features.height},
+    )
     is_series_bool_idx = {
         "DWI": [],
         "T2W": [],
@@ -118,6 +167,10 @@ def get_heuristics_prostate_mpmri(
             "series_uid": features["series_uid"],
             **is_series_bool_idx,
         }
+    )
+    logger.info(
+        "Finished computing prostate mpMRI heuristics",
+        extra={"n_rows": heuristics_df.height},
     )
     return heuristics_df
 

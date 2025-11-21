@@ -1,5 +1,6 @@
 import os
 import re
+import logging
 import pydicom
 import numpy as np
 from typing import Any
@@ -8,6 +9,8 @@ from glob import glob
 from pydicom.filereader import dcmread
 from pydicom.dataset import Dataset
 from scipy import stats
+
+logger = logging.getLogger(__name__)
 
 seg_sop = "1.2.840.10008.5.1.4.1.1.66.4"
 
@@ -144,8 +147,12 @@ def process_bvalue(v: bytes | float | int, dicom_file: Dataset) -> float | int:
         float | int: processed b-value.
     """
     if isinstance(v, bytes):
+        logger.debug("Processing b-value from bytes")
         v = int.from_bytes(v, byteorder="big")
         if v > 5000:
+            logger.debug(
+                "Unrealistic b-value %s detected, using header value", v
+            )
             v = dicom_file[dicom_header_dict["diffusion_bvalue"]].value[0]
     return v
 
@@ -164,6 +171,7 @@ def process_bvalue_ge(
         float | int: processed b-value.
     """
     if isinstance(v, bytes):
+        logger.debug("Processing GE b-value from bytes")
         v = v.decode().split("\\")[0]
     elif isinstance(v, pydicom.multival.MultiValue):
         v = v[0]
@@ -184,6 +192,7 @@ def process_series_description(v: str, dicom_file: None = None) -> str:
         str: processed series description.
     """
     # replace times with empty space...
+    logger.debug("Processing series description")
     v = re.sub("[0-9]+/[0-9]+/[0-9]+", "", v)
     v = re.sub("[0-9]+-[0-9]+-[0-9]+", "", v)
     v = re.sub("[0-9]+:[0-9]+:[0-9]+", "", v)
@@ -201,6 +210,7 @@ def process_multivalues(v: Any) -> str | int | float:
         (str | int | float): processed multi-valued DICOM header.
     """
     if isinstance(v, pydicom.multival.MultiValue):
+        logger.debug("Processing MultiValue DICOM field")
         v = " ".join([str(x) for x in v])
     if isinstance(v, list):
         v = " ".join([str(x) for x in v])
@@ -225,9 +235,10 @@ def extract_metadata_from_file(dicom_file: Dataset) -> dict:
     Returns:
         dict: extracted metadata (available in ``dicom_header_dict``).
     """
+    logger.debug("Extracting metadata from DICOM file")
     output_dict = {"valid": True, "seg": False}
     if (0x0008, 0x0016) not in dicom_file:
-        dicom_file["valid"] = False
+        output_dict["valid"] = False
     # skips file if SOP class is segmentation
     if dicom_file[0x0008, 0x0016].value == seg_sop:
         output_dict["seg"] = True
@@ -252,6 +263,7 @@ def extract_metadata_from_file(dicom_file: Dataset) -> dict:
             output_dict["diffusion_bvalue_final"] = output_dict[bvalue_key]
             break
 
+    logger.debug("Finished extracting metadata")
     return output_dict
 
 
@@ -277,6 +289,15 @@ def extract_features_from_dicom(
     Returns:
         dict[str, list | str | float | int]: a dictionary with features.
     """
+    logger.info(
+        "Extracting DICOM features from series",
+        extra={
+            "path": path,
+            "join": join,
+            "return_paths": return_paths,
+            "image_features": image_features,
+        },
+    )
     file_paths = glob(os.path.join(path, "*dcm"))
     n_images = len(file_paths)
     output_dict = {}
@@ -284,17 +305,26 @@ def extract_features_from_dicom(
     for file in file_paths:
         try:
             dicom_file = dcmread(file, stop_before_pixels=not image_features)
-        except:
+        except Exception as e:
+            logger.warning(
+                "Failed to read DICOM file",
+                extra={"file": file, "error": str(e)},
+            )
             continue
 
         features = extract_metadata_from_file(dicom_file)
         if features is None:
+            logger.debug("No features extracted for file", extra={"file": file})
             continue
         if image_features is True and (0x7FE0, 0x0010) in dicom_file:
             try:
                 features.update(extract_pixel_features(dicom_file))
             except ValueError:
                 # can happen if incomplete pixel array is present
+                logger.warning(
+                    "Skipping file with invalid pixel data",
+                    extra={"file": file},
+                )
                 continue
 
         for k in features:
@@ -305,6 +335,7 @@ def extract_features_from_dicom(
 
     output_dict["number_of_images"] = [n_images for _ in range(N)]
     if join is True:
+        logger.debug("Joining feature lists for non-image keys")
         for k in output_dict:
             if (
                 k not in ["number_of_images", "seg", "valid"]
@@ -316,6 +347,10 @@ def extract_features_from_dicom(
         output_dict["file_paths"] = file_paths
         output_dict["path"] = path
 
+    logger.info(
+        "Finished extracting DICOM features from series",
+        extra={"path": path, "n_images": n_images, "n_processed": N},
+    )
     return output_dict
 
 
@@ -336,9 +371,13 @@ def extract_pixel_features(dicom_file: Dataset) -> dict:
             blur_effect,
         )
     except ImportError:
+        logger.error(
+            "scikit-image is required to extract pixel-wise features but is not installed"
+        )
         raise ImportError(
             "The scikit-image is required to extract pixel-wise features."
         )
+    logger.debug("Extracting pixel-wise features")
     pixel_array = dicom_file.pixel_array.astype(np.float32)
     flat_array = pixel_array.flatten()
     features = {
@@ -365,6 +404,7 @@ def extract_pixel_features(dicom_file: Dataset) -> dict:
     features.update(moments)
     features.update(ev)
     features = {k: float(features[k]) for k in features}
+    logger.debug("Extracted pixel-wise features")
     return features
 
 
@@ -391,6 +431,10 @@ def extract_pixel_features_series(path: str) -> dict[str, list]:
             if k not in all_keys:
                 all_keys.append(k)
     features = {k: [x[k] for x in features] for k in all_keys}
+    logger.info(
+        "Finished extracting pixel features for DICOM series",
+        extra={"path": path, "n_files": len(file_paths)},
+    )
     return features
 
 
@@ -410,6 +454,14 @@ def extract_all_features(
     Returns:
         dict: all features.
     """
+    logger.info(
+        "Extracting all features from DICOM file",
+        extra={
+            "path": path,
+            "metadata_features": metadata_features,
+            "image_features": image_features,
+        },
+    )
 
     study_uid, series_uid, file_name = str(path).split(os.sep)[-3:]
     features = {
@@ -421,24 +473,39 @@ def extract_all_features(
     valid = True
     try:
         dicom_file = dcmread(path)
-    except:
+    except Exception as e:
+        logger.warning(
+            "Failed to read DICOM file", extra={"path": path, "error": str(e)}
+        )
         valid = False
 
     if valid:
         if metadata_features is True:
             try:
                 features.update(extract_metadata_from_file(dicom_file))
-            except:
+            except Exception as e:
+                logger.warning(
+                    "Failed to extract metadata features",
+                    extra={"path": path, "error": str(e)},
+                )
                 valid = False
         if image_features is True:
             try:
                 features.update(extract_pixel_features(dicom_file))
-            except:
+            except Exception as e:
+                logger.warning(
+                    "Failed to extract pixel features",
+                    extra={"path": path, "error": str(e)},
+                )
                 valid = False
         features["seg"] = dicom_file[0x0008, 0x0016].value == seg_sop
     else:
         features["seg"] = False
     features["valid"] = valid
+    logger.info(
+        "Finished extracting all features from DICOM file",
+        extra={"path": path, "valid": valid},
+    )
     return features
 
 
@@ -458,6 +525,14 @@ def extract_all_features_series(
     Returns:
         dict: all features.
     """
+    logger.info(
+        "Extracting all features for DICOM series",
+        extra={
+            "path": path,
+            "metadata_features": metadata_features,
+            "pixel_features": pixel_features,
+        },
+    )
     file_list = Path(path).rglob("*dcm")
     all_keys = []
     all_features = []
@@ -467,6 +542,10 @@ def extract_all_features_series(
             if k not in all_keys:
                 all_keys.append(k)
         all_features.append(features)
+    logger.info(
+        "Finished extracting all features for DICOM series",
+        extra={"path": path, "n_files": len(all_features)},
+    )
     return {k: [x[k] for x in all_features] for k in all_keys}
 
 
