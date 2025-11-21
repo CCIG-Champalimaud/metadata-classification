@@ -1,3 +1,4 @@
+import logging
 import yaml
 from msc.api.utils import DicomWebHelper
 from ..api.app_funcs import (
@@ -5,6 +6,9 @@ from ..api.app_funcs import (
     ModelServer,
     DICOMWebPredictionRequest,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 def main():
@@ -52,6 +56,16 @@ def main():
 
     args = parser.parse_args()
 
+    logger.info(
+        "Starting DICOMweb prediction",
+        extra={
+            "dicomweb_url": args.dicomweb_url,
+            "model_config": args.model_config,
+            "model_id": args.model_id,
+            "n_studies": len(args.study_uid),
+        },
+    )
+
     with open(args.model_config, "r") as o:
         configuration = yaml.safe_load(o)
 
@@ -76,7 +90,7 @@ def main():
         study_uid=args.study_uid,
         dicom_web_url=args.dicomweb_url,
     )
-
+    logger.info("Submitting DICOMweb prediction request")
     return model_server.predict_dicomweb_api(prediction_request)
 
 
