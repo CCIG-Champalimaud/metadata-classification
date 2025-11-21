@@ -1,4 +1,5 @@
 import argparse
+import logging
 import dill
 import joblib
 import numpy as np
@@ -9,6 +10,9 @@ from ..constants import text_sep_cols, num_sep_cols, num_cols
 from ..sanitization import sanitize_data
 from ..data_loading import read_data
 from ..heuristics import heuristics_dict
+
+
+logger = logging.getLogger(__name__)
 
 
 class RemappingUnpickler(dill.Unpickler):
@@ -79,6 +83,10 @@ def predict_non_catboost(
     model: dict, features: pl.DataFrame, match: np.ndarray = None
 ) -> list[np.ndarray]:
     curr_predictions = []
+    logger.debug(
+        "Running non-CatBoost predictions",
+        extra={"n_folds": len(model.get("cv", [])), "n_rows": features.height},
+    )
     for fold in model["cv"]:
         count_vec: TextColsToCounts = fold["count_vec"]
         count_vec.cols_to_drop = ["series_uid", "study_uid"]
@@ -203,6 +211,17 @@ def main():
 
     args = parser.parse_args()
 
+    logger.info(
+        "Starting prediction",
+        extra={
+            "input_paths": args.input_paths,
+            "model_paths": args.model_paths,
+            "dicom_recursion": args.dicom_recursion,
+            "heuristics": args.heuristics,
+            "reduce": args.reduce,
+        },
+    )
+
     if args.reduce == "series":
         group_cols = ["study_uid", "series_uid", "patient_id"]
     elif args.reduce == "study":
@@ -228,6 +247,7 @@ def main():
     # predict
     for model_path in args.model_paths:
         model_extension = model_path.split(".")[-1]
+        logger.info("Loading model", extra={"model_path": model_path})
         if model_extension == "joblib":
             model = joblib.load(model_path)
         else:
@@ -268,6 +288,13 @@ def main():
         # aggregate prediction average
         predictions_df = get_average_predictions(all_predictions_fold)
 
+    logger.info(
+        "Finished prediction",
+        extra={
+            "task": task,
+            "n_rows": getattr(predictions_df, "height", len(predictions_df)),
+        },
+    )
     # print predctions
     print(predictions_df.to_pandas().to_csv(index=False))
 
