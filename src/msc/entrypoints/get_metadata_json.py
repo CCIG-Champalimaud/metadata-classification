@@ -2,12 +2,16 @@ import argparse
 import os
 import json
 import re
+import logging
 import numpy as np
 from multiprocessing import Pool
 from pathlib import Path
 from tqdm import tqdm
 
 from ..dicom_feature_extraction import extract_features_from_dicom
+
+
+logger = logging.getLogger(__name__)
 
 
 def filter_b_value(d: dict, bval_key: str = "diffusion_bvalue") -> dict:
@@ -29,13 +33,20 @@ def filter_b_value(d: dict, bval_key: str = "diffusion_bvalue") -> dict:
         s = np.unique(bval)
         if len(s) > 1:
             max_bval = np.max(s)
+            logger.debug(
+                "Filtering by maximum b-value",
+                extra={"bval_key": bval_key, "max_bval": float(max_bval)},
+            )
             for k in d:
                 if k not in ["number_of_images", "path"]:
                     d[k] = [
                         x for i, x in enumerate(d[k]) if bval[i] == max_bval
                     ]
-    except:
-        pass
+    except Exception as e:
+        logger.warning(
+            "Failed to filter by b-value",
+            extra={"bval_key": bval_key, "error": str(e)},
+        )
     return d
 
 
@@ -104,9 +115,19 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    logger.info(
+        "Starting metadata extraction to JSON",
+        extra={
+            "input_dir": args.input_dir,
+            "pattern": args.pattern,
+            "individual_pattern": args.individual_pattern,
+            "n_workers": args.n_workers,
+        },
+    )
+
     all_metadata = {}
     files = [str(x) for x in Path(args.input_dir).glob(args.pattern)]
-    print(files)
+    logger.info("Found %d files for metadata extraction", len(files))
     if args.n_workers < 2:
         for f in tqdm(files):
             individual_id = re.search(args.individual_pattern, f).group()
@@ -149,4 +170,7 @@ if __name__ == "__main__":
             prog.update()
         prog.close()
 
+    logger.info(
+        "Finished metadata extraction", extra={"n_patients": len(all_metadata)}
+    )
     print(json.dumps(all_metadata, indent=2, sort_keys=True))

@@ -1,10 +1,14 @@
 import argparse
+import logging
 import polars as pl
 from multiprocessing import Pool
 from pathlib import Path
 from tqdm import tqdm
 
 from ..dicom_feature_extraction import extract_all_features
+
+
+logger = logging.getLogger(__name__)
 
 
 class DICOMFeatureExtraction:
@@ -54,6 +58,16 @@ def main():
 
     args = parser.parse_args()
 
+    logger.info(
+        "Starting DICOM feature extraction to parquet",
+        extra={
+            "input_dirs": args.input_dir,
+            "feature_types": args.feature_types,
+            "n_workers": args.n_workers,
+            "output_path": args.output_path,
+        },
+    )
+
     files = []
     for folder in args.input_dir:
         files.extend([str(x) for x in Path(folder).rglob(args.pattern)])
@@ -76,6 +90,10 @@ def main():
                     if f is not None:
                         output.append(f)
 
+    logger.info(
+        "Writing extracted features to parquet",
+        extra={"n_series": len(output), "output_path": args.output_path},
+    )
     pl.DataFrame(output).write_parquet(args.output_path)
 
 
