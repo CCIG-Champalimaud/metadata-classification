@@ -1,4 +1,4 @@
-import numpy as np
+import logging
 import polars as pl
 from .constants import (
     text_sep_cols,
@@ -7,6 +7,9 @@ from .constants import (
     replace_cols,
     cols_to_drop,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 rep_dict = {
@@ -36,6 +39,10 @@ def sanitize_data(data: pl.DataFrame) -> pl.DataFrame:
         pl.DataFrame: the sanitized DataFrame.
     """
 
+    logger.info(
+        "Sanitising data",
+        extra={"n_rows": data.height, "n_columns": len(data.columns)},
+    )
     all_cols = list(set([*text_sep_cols, *num_sep_cols, *replace_cols]))
     col_expressions = []
     for col in all_cols:
@@ -49,6 +56,11 @@ def sanitize_data(data: pl.DataFrame) -> pl.DataFrame:
         if col in replace_cols:
             pl_col = pl_col.replace("", replace_cols[col])
         pl_col = pl_col.str.to_lowercase()
-        col_expressions.append(col)
-    data = data.with_columns(col_expressions)
+        col_expressions.append(pl_col.alias(col))
+    if col_expressions:
+        data = data.with_columns(col_expressions)
+    logger.debug(
+        "Finished sanitising data",
+        extra={"n_rows": data.height, "n_columns": len(data.columns)},
+    )
     return data
