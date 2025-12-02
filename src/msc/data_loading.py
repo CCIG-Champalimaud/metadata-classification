@@ -66,6 +66,15 @@ def read_data_dicom_dataset(
                 features[k].extend(f[k])
     logger.info("Finished feature extraction for DICOM dataset")
     features = pl.from_dict({k: features[k] for k in features})
+    if features.shape[0] == 0:
+        error_str = " ".join(
+            [
+                "No features extracted from DICOM dataset.",
+                "Make sure that the input_paths and dicom_recursion are correct",
+            ]
+        )
+        logger.error(error_str)
+        raise ValueError(error_str)
     return features
 
 
