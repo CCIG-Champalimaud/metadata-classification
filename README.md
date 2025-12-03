@@ -199,4 +199,4 @@ If you use this please cite our work available [here](https://insightsimaging.sp
 
 *de Almeida, J.G., Verde, A.S.C., Bilreiro, C. et al. Automatic sequence identification in multicentric prostate multiparametric MRI datasets for clinical machine-learning. Insights Imaging 16, 75 (2025). https://doi.org/10.1186/s13244-025-01938-2*
 
-[^1]: we were not able to identify concrete advantages from performing this.
+[^1]: from our tests, image-derived features do not out-perform metadata-based features. This includes not only the features extracted using this package, but also other features based on deep-learning or MRI-specific foundation models.
