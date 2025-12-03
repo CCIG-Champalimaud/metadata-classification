@@ -81,7 +81,7 @@ python msc_predict \
 
 The input path (`<PATH TO DICOM DIRECTORY>`) can be:
 * The path to a DICOM series folder
-* The path to a DICOM dataset (or study). For this, `--dicom_recursion` has to be specified to how deep in the folder structure one is expected to find DICOM files.
+* The path to a DICOM dataset (or study). For this, `--dicom_recursion` has to be specified to how deep in the folder structure one is expected to find DICOM files. For example, if a patient directory is provided (`patient` with folder structure `patient/study1/series1`, `patient/study1/series2`, `patient/study2/series3`, ...) the level of `dicom_recursion` should be `2`. If a directory with multiple patient studies is provided (`dir` with folder structure `dir/patient1/study1/series1`, `dir/patient2/study2/series4`, ...), the level of `dicom_recursion` should be `3`.
 * A CSV, TSV or Parquet file with - at least - the columns which the model will be using and a `study_uid` and `series_uid` column. This file can either have one row for each instance (each field corresponding to one metadata value) or for each series (each field corresponds to the space-concantenated list of unique metadata values for this series), but the latter is preferred. **For reference:**
     * Predicting the sequence types for a TSV file with 5,520,218 instances (approximately 60K series) takes approximately 2 minutes and 30 seconds
     * Predicting the sequence types for a parquet file with 60K series (the same 60K series) takes approximately 30 seconds
