@@ -1,4 +1,10 @@
-# DICOM metadata series classification (MSC) mpMRI sequence classification from DICOM metadata
+# DICOM Metadata Series Classification (MSC)
+
+*Automatic mpMRI sequence classification from DICOM metadata*
+
+## What this is
+
+This project provides a command-line toolkit and Python package to automatically classify sequences using DICOM metadata. Particularly, we have used this to classify prostate mpMRI DICOM series into sequence types (T2, ADC, DWI, DCE, others) using DICOM metadata and optionally image-derived features [^1]. You can use it to build new models on your own datasets or to run inference with existing models on large, weakly annotated collections.
 
 ## Context
 
@@ -18,7 +24,7 @@ To manage dependencies we use `micromamba` and `uv`, a Python package manager. T
 2. `micromamba activate dicom-classification`
 3. `micromamba install python=$(cat .python-version) uv -c conda-forge -y`
 4. `uv sync`
-5. `uv pip install -r pyproject.toml`
+5. `uv pip install -e .`
 
 And you should be all set!
 
@@ -28,23 +34,44 @@ In `pyproject.toml` we specify different optional dependencies depending on what
 
 #### Model training 
 
-Add `--extra train` to `uv sync`.
+```bash
+uv sync --extra train
+```
 
 #### Model serving
 
-If you want to serve models using `fastapi`, you need to add `--extra serve` to `uv sync`.
+```bash
+uv sync --extra serve
+```
 
 #### Model serving with `catboost`, `lightgbm` or `xgboost`
 
-If you want to serve `catboost`, `lightgbm` or `xgboost` models, you need to add `--extra server catboost`, `--extra server lightgbm` or `--extra server xgboost` to `uv sync`, respectively.
+```bash
+uv sync --extra serve,catboost
+uv sync --extra serve,lightgbm
+uv sync --extra serve,xgboost
+```
 
 #### Pixel information extraction
 
-If you want to extract pixel features you need to add `--extra pixel` to `uv sync`.
+```bash
+uv sync --extra pixel
+```
 
 ### Package building
 
 You can also build the package using `uv` using `uv build`.
+
+## Project structure
+
+- `src/msc/`: Python package with feature extraction, training, inference, heuristics, and API code
+- `src/msc/get_feature_parquet.py`: CLI for extracting metadata features from DICOM series
+- `src/msc/entrypoints/train.py`: CLI entrypoint for model training (`msc_train`)
+- `src/msc/entrypoints/predict.py`: CLI entrypoint for inference (`msc_predict`)
+- `src/msc/api/app.py`: FastAPI application for serving models via HTTP APIs
+- `models/`: directory where trained models are stored and loaded from
+- `config-api.yaml`: configuration file for the API (models, heuristics, filters)
+- `train_all_models.smk`: Snakemake pipeline with a practical example of training all models
 
 ## Code details
 
@@ -54,7 +81,17 @@ The Python code presented here concerns, loosely, feature extraction, model trai
 
 *In `src/msc/get_feature_parquet.py`*
 
-The extraction of metadata values from each DICOM series, which can be run as a command line utility - `msc_feature_extraction --input_dir <PATH TO DICOM DATASET> --pattern '*dcm' --n_workers 8 --output_path <OUTPUT PATH>` - producing a parquet file with all the metadata values for each DICOM series. It is possible to extract two feature types and these are specified using `--feature_types`:
+The extraction of metadata values from each DICOM series can be run as a command-line utility:
+
+```bash
+msc_feature_extraction \
+  --input_dir <PATH TO DICOM DATASET> \
+  --pattern '*dcm' \
+  --n_workers 8 \
+  --output_path <OUTPUT PATH>
+```
+
+It is possible to extract two feature types and these are specified using `--feature_types`:
 
 * `metadata`: extracts standard DICOM metadata values
 * `image` extracts features retrieved from the pixel array of each individual series
@@ -94,7 +131,16 @@ Inference can apply heuristics on top of the predictions to obtain refined predi
 
 *In `src/msc/api/app.py`*
 
-To perform model serving with a dedicated API, we use FastAPI. So running this is as simple as running `fastapi run src/msc/api/app.py` (or `fastapi dev src/msc/api/app.py` for development). Inferences are supported for:
+To perform model serving with a dedicated API, we use FastAPI. Running the API is as simple as:
+
+```bash
+fastapi run src/msc/api/app.py
+
+# or, for development
+fastapi dev src/msc/api/app.py
+```
+
+Inferences are supported for:
 
 * **Standard queries**: a post request to `http://localhost:8000/predict` with a JSON body with the following keys:
     * `dicom_path`: the path to the DICOM directory (will recursively fetch all DICOM series)
@@ -143,9 +189,14 @@ We recommend having a file (i.e. `.env`) which is sourced with these constants p
 
 While we considered including the Orthanc and DICOM-web credentials in the configuration file, we decided against this as it would make it easier to leak the credentials (and this allows easier deployment through Docker/Docker-compose/Kubernetes/etc through the definition of environment variables in the manifest files).
 
+## License
+
+This project is licensed under a standard MIT described in [`LICENSE`](./LICENSE).
+
 # Reference
 
 If you use this please cite our work available [here](https://insightsimaging.springeropen.com/articles/10.1186/s13244-025-01938-2):
 
 *de Almeida, J.G., Verde, A.S.C., Bilreiro, C. et al. Automatic sequence identification in multicentric prostate multiparametric MRI datasets for clinical machine-learning. Insights Imaging 16, 75 (2025). https://doi.org/10.1186/s13244-025-01938-2*
 
+[^1]: we were not able to identify concrete advantages from performing this.
