@@ -1,3 +1,4 @@
+from fileinput import filename
 from genericpath import isdir
 import os
 import re
@@ -22,21 +23,6 @@ from .constants import cols_to_drop
 
 logger = logging.getLogger(__name__)
 
-def filter_out_non_dicom(paths: list[str]) -> list[str]:
-    """
-    Removes all non-DICOM files from a list of paths.
-
-    Args:
-        paths (list[str]): list of paths.
-    
-    Returns:
-        list[str]: list of DICOM paths.
-    """
-    def is_dicom(path: str | Path) -> bool:
-        if os.path.isdir(path):
-            return False
-        return pydicom.misc.is_dicom(path)
-    return [p for p in paths if is_dicom(p)]
 
 def read_data_dicom_dataset(
     input_paths: list[str] | str, dicom_recursion: int, n_workers: int = 0
@@ -53,8 +39,9 @@ def read_data_dicom_dataset(
     all_series_paths = []
     if dicom_recursion == -1:
         for input_path in input_paths:
-            all_series_paths.append(Path(input_path).rglob("*"))
-        all_series_paths = chain(*all_series_paths)
+            all_series_paths = [
+                root for root, _, fns in os.walk(input_path) if fns
+            ]
     else:
         for input_path in input_paths:
             all_series_paths.extend(
@@ -67,15 +54,15 @@ def read_data_dicom_dataset(
                     )
                 )
             )
-    all_series_paths = filter_out_non_dicom(
-        tqdm(all_series_paths, desc="Filtering out non DICOM files..."))
     n = len(all_series_paths)
     logger.info("Found %d series paths in DICOM dataset", n)
     features = {}
     if n_workers > 0:
         with Pool(n_workers) as p:
             for f in tqdm(
-                p.imap_unordered(extract_features_from_dicom, all_series_paths),
+                p.imap_unordered(
+                    extract_features_from_dicom, all_series_paths
+                ),
                 total=n,
             ):
                 for k in f:
@@ -90,6 +77,7 @@ def read_data_dicom_dataset(
                 if k not in features:
                     features[k] = []
                 features[k].extend(f[k])
+
     logger.info("Finished feature extraction for DICOM dataset")
     features = pl.from_dict({k: features[k] for k in features})
     if features.shape[0] == 0:
@@ -277,7 +265,9 @@ def auto_match_columns(data: pl.DataFrame) -> pl.DataFrame:
             value = value.replace(sub_str, "_")
         return camel_case_to_snake_case(value)
 
-    logger.info("Auto-matching columns", extra={"n_columns": len(data.columns)})
+    logger.info(
+        "Auto-matching columns", extra={"n_columns": len(data.columns)}
+    )
     columns = data.columns
     dicom_header_names = list(dicom_header_dict.keys())
     rename_dict = {}
