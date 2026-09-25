@@ -2,8 +2,11 @@ import os
 import re
 import json
 import logging
+import pydicom
 import polars as pl
+from itertools import chain
 from glob import glob
+from pathlib import Path
 from multiprocessing import Pool
 from difflib import SequenceMatcher
 from tqdm import tqdm
@@ -18,6 +21,17 @@ from .constants import cols_to_drop
 
 logger = logging.getLogger(__name__)
 
+def filter_out_non_dicom(paths: list[str]) -> list[str]:
+    """
+    Removes all non-DICOM files from a list of paths.
+
+    Args:
+        paths (list[str]): list of paths.
+    
+    Returns:
+        list[str]: list of DICOM paths.
+    """
+    return [p for p in paths if pydicom.misc.is_dicom(p)]
 
 def read_data_dicom_dataset(
     input_paths: list[str] | str, dicom_recursion: int, n_workers: int = 0
@@ -32,17 +46,23 @@ def read_data_dicom_dataset(
     if isinstance(input_paths, str):
         input_paths = [input_paths]
     all_series_paths = []
-    for input_path in input_paths:
-        all_series_paths.extend(
-            glob(
-                os.sep.join(
-                    [
-                        input_path.rstrip("/"),
-                        *["*" for _ in range(dicom_recursion)],
-                    ]
+    if dicom_recursion == -1:
+        for input_path in input_paths:
+            all_series_paths.append(Path(input_path).rglob("*"))
+        all_series_paths = chain(all_series_paths)
+    else:
+        for input_path in input_paths:
+            all_series_paths.extend(
+                glob(
+                    os.sep.join(
+                        [
+                            input_path.rstrip("/"),
+                            *["*" for _ in range(dicom_recursion)],
+                        ]
+                    )
                 )
             )
-        )
+    all_series_paths = filter_out_non_dicom(tqdm(all_series_paths, desc="Filtering out non DICOM files..."))
     n = len(all_series_paths)
     logger.info("Found %d series paths in DICOM dataset", n)
     features = {}
@@ -345,7 +365,7 @@ def read_data(
     for input_path in input_paths:
         extension = input_path.split(".")[-1]
         if os.path.isdir(input_path) == True:
-            if dicom_recursion > 0:
+            if dicom_recursion != 0:
                 reading_operators["dicom_dataset"].append(input_path)
             else:
                 reading_operators["dicom"].append(input_path)
