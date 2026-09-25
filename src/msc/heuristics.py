@@ -56,8 +56,7 @@ class StringVariable(str):
         # coherce to string
         if isinstance(list_of_substr, str):
             list_of_substr = [list_of_substr]
-        if check is not None:
-            value = self.value.split(split)
+        value = value if split is None else self.value.split(split)
         if check == "all":
             result = self.contains_all(value, list_of_substr)
         elif check == "any":

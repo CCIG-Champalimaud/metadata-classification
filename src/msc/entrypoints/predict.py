@@ -283,7 +283,7 @@ def main():
         # calculate heuristics
         if args.heuristics is not None:
             heuristics_df = heuristics_dict[args.heuristics](features)
-            heuristics_df = apply_heuristics(predictions_df, heuristics_df)
+            predictions_df = apply_heuristics(predictions_df, heuristics_df)
     elif task == "regression":
         # aggregate prediction average
         predictions_df = get_average_predictions(all_predictions_fold)
