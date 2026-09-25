@@ -49,7 +49,7 @@ def read_data_dicom_dataset(
     if dicom_recursion == -1:
         for input_path in input_paths:
             all_series_paths.append(Path(input_path).rglob("*"))
-        all_series_paths = chain(all_series_paths)
+        all_series_paths = chain(*all_series_paths)
     else:
         for input_path in input_paths:
             all_series_paths.extend(
