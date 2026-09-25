@@ -1,3 +1,4 @@
+from genericpath import isdir
 import os
 import re
 import json
@@ -31,7 +32,11 @@ def filter_out_non_dicom(paths: list[str]) -> list[str]:
     Returns:
         list[str]: list of DICOM paths.
     """
-    return [p for p in paths if pydicom.misc.is_dicom(p)]
+    def is_dicom(path: str | Path) -> bool:
+        if os.path.isdir(path):
+            return False
+        return pydicom.misc.is_dicom(path)
+    return [p for p in paths if is_dicom(p)]
 
 def read_data_dicom_dataset(
     input_paths: list[str] | str, dicom_recursion: int, n_workers: int = 0
@@ -62,7 +67,8 @@ def read_data_dicom_dataset(
                     )
                 )
             )
-    all_series_paths = filter_out_non_dicom(tqdm(all_series_paths, desc="Filtering out non DICOM files..."))
+    all_series_paths = filter_out_non_dicom(
+        tqdm(all_series_paths, desc="Filtering out non DICOM files..."))
     n = len(all_series_paths)
     logger.info("Found %d series paths in DICOM dataset", n)
     features = {}
