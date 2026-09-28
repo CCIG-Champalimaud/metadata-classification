@@ -199,7 +199,7 @@ def main():
         "--n_workers",
         type=int,
         default=0,
-        help="Number of workers when dicom_recursion > 0",
+        help="Number of workers when dicom_recursion != 0",
     )
     parser.add_argument(
         "--feature_column_mapping",
